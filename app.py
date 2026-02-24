@@ -24,7 +24,7 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 KST = timezone(timedelta(hours=9))
 
 # ✅ 기존 관리자 유지(교사)
-ADMIN_PIN = "9999"
+ADMIN_PIN = "tpqms7rn"
 ADMIN_NAME = "관리자"
 
 # 신용등급 미반영 학생도 기본 기능(은행/경매/복권)을 바로 사용하도록 기본값 고정
