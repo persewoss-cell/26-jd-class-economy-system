@@ -24,7 +24,7 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 KST = timezone(timedelta(hours=9))
 
 # ✅ 기존 관리자 유지(교사)
-ADMIN_PIN = "9999"
+ADMIN_PIN = "tpqms7rn"
 ADMIN_NAME = "관리자"
 
 # =========================
