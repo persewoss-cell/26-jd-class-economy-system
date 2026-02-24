@@ -1808,6 +1808,8 @@ def api_create_account(name, pin):
             "name": name,
             "pin": pin,
             "balance": 0,
+            "credit_score": DEFAULT_CREDIT_SCORE,
+            "credit_grade": DEFAULT_CREDIT_GRADE,            
             "is_active": True,
             "role_id": "",
             "created_at": firestore.SERVER_TIMESTAMP,
@@ -2047,15 +2049,26 @@ def api_broker_deposit_by_student_id(actor_student_id: str, student_id: str, mem
 def api_get_txs_by_student_id(student_id: str, limit=200):
     if not student_id:
         return {"ok": False, "error": "student_id가 없습니다."}
-    q = (
-        db.collection("transactions")
-        .where(filter=FieldFilter("student_id", "==", student_id))
-        .order_by("created_at", direction=firestore.Query.DESCENDING)
-        .limit(int(limit))
-        .stream()
-    )
+    try:
+        q = (
+            db.collection("transactions")
+            .where(filter=FieldFilter("student_id", "==", student_id))
+            .order_by("created_at", direction=firestore.Query.DESCENDING)
+            .limit(int(limit))
+            .stream()
+        )
+        tx_docs = list(q)
+    except FailedPrecondition:
+        # 신규 배포 환경에서 복합 인덱스가 준비되지 않은 경우를 대비
+        fallback_q = (
+            db.collection("transactions")
+            .where(filter=FieldFilter("student_id", "==", student_id))
+            .stream()
+        )
+        tx_docs = list(fallback_q)
+        
     rows = []
-    for d in q:
+    for d in tx_docs:
         tx = d.to_dict() or {}
         created_dt_utc = _to_utc_datetime(tx.get("created_at"))
         amt = int(tx.get("amount", 0) or 0)
@@ -2072,6 +2085,9 @@ def api_get_txs_by_student_id(student_id: str, limit=200):
                 "balance_after": int(tx.get("balance_after", 0) or 0),
             }
         )
+
+    rows.sort(key=lambda x: x.get("created_at_utc") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    rows = rows[: int(limit)]
     return {"ok": True, "rows": rows}
 
 def api_get_balance(login_name, login_pin):
@@ -5255,6 +5271,8 @@ with st.sidebar:
                             "name": manage_name,
                             "pin": manage_pin,
                             "balance": 0,
+                            "credit_score": DEFAULT_CREDIT_SCORE,
+                            "credit_grade": DEFAULT_CREDIT_GRADE,                            
                             "is_active": True,
                             "role_id": "",
                             "io_enabled": True,
@@ -9635,6 +9653,8 @@ if "👥 계정 정보/활성화" in tabs:
                                 {
                                     **payload,
                                     "balance": 0,
+                                    "credit_score": DEFAULT_CREDIT_SCORE,
+                                    "credit_grade": DEFAULT_CREDIT_GRADE,                            
                                     "role_id": "",
                                     "created_at": firestore.SERVER_TIMESTAMP,
                                 }
