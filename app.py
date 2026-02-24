@@ -24,7 +24,7 @@ st.set_page_config(page_title=APP_TITLE, layout="wide")
 KST = timezone(timedelta(hours=9))
 
 # ✅ 기존 관리자 유지(교사)
-ADMIN_PIN = "tpqms7rn"
+ADMIN_PIN = "9999"
 ADMIN_NAME = "관리자"
 
 # =========================
@@ -644,8 +644,8 @@ except Exception as e:
 # Utils (너 코드 유지 + 권한 유틸 추가)
 # =========================
 def pin_ok(pin: str) -> bool:
-    return str(pin or "").isdigit() and len(str(pin or "")) == 4
-
+    return len(str(pin or "")) == 4
+    
 def toast(msg: str, icon: str = "✅"):
     if hasattr(st, "toast"):
         st.toast(msg, icon=icon)
@@ -1791,8 +1791,8 @@ def api_create_account(name, pin):
     pin = (pin or "").strip()
     if not name:
         return {"ok": False, "error": "이름이 필요합니다."}
-    if not (pin.isdigit() and len(pin) == 4):
-        return {"ok": False, "error": "PIN은 4자리 숫자여야 합니다."}
+    if not pin_ok(pin):
+        return {"ok": False, "error": "PIN은 4자리여야 합니다."}
     if fs_get_student_doc_by_name(name):
         return {"ok": False, "error": "이미 존재하는 계정입니다."}
     db.collection("students").document().set(
@@ -1828,9 +1828,9 @@ def api_change_pin_student(name: str, old_pin: str, new_pin: str):
     if not name:
         return {"ok": False, "error": "이름이 필요합니다."}
     if not pin_ok(old_pin):
-        return {"ok": False, "error": "기존 비밀번호는 4자리 숫자여야 합니다."}
+        return {"ok": False, "error": "기존 비밀번호는 4자리여야 합니다."}
     if not pin_ok(new_pin):
-        return {"ok": False, "error": "새 비밀번호는 4자리 숫자여야 합니다."}
+        return {"ok": False, "error": "새 비밀번호는 4자리여야 합니다."}
 
     doc = fs_auth_student(name, old_pin)  # ✅ 기존 PIN 인증
     if not doc:
@@ -5155,9 +5155,9 @@ with st.sidebar:
         if not stu_name:
             st.error("이름(계정)을 입력해 주세요.")
         elif not pin_ok(old_pin):
-            st.error("기존 비밀번호는 4자리 숫자여야 해요.")
+            st.error("기존 비밀번호는 4자리여야 해요.")
         elif not pin_ok(new_pin1) or not pin_ok(new_pin2):
-            st.error("새 비밀번호는 4자리 숫자여야 해요.")
+            st.error("새 비밀번호는 4자리여야 해요.")
         elif new_pin1 != new_pin2:
             st.error("새 비밀번호와 확인이 일치하지 않습니다.")
         elif old_pin == new_pin1:
@@ -5180,14 +5180,14 @@ with st.sidebar:
     st.header("🔐 [관리자] 계정생성 / PIN변경 / 삭제")
 
     # ✅ 공통 입력(한 블록으로 통합)
-    admin_manage_pin = st.text_input("관리자 비밀번호(4자리)", type="password", key="admin_manage_pin").strip()
+    admin_manage_pin = st.text_input("관리자 비밀번호", type="password", key="admin_manage_pin").strip()
     manage_name = st.text_input("이름(계정)", key="manage_name").strip()
-    manage_pin = st.text_input("비밀번호(4자리 숫자)", type="password", key="manage_pin").strip()
-
+    manage_pin = st.text_input("비밀번호(4자리)", type="password", key="manage_pin").strip()
+    
     # ✅ 공통 체크(관리자 비번)
     def _admin_guard():
-        if not pin_ok(admin_manage_pin):
-            st.error("관리자 비밀번호는 4자리 숫자여야 해요.")
+        if not admin_manage_pin:
+            st.error("관리자 비밀번호를 입력해 주세요.")
             return False
         if not is_admin_pin(admin_manage_pin):
             st.error("관리자 비밀번호가 틀립니다.")
@@ -5223,7 +5223,7 @@ with st.sidebar:
             if not manage_name:
                 st.error("이름을 입력해 주세요.")
             elif not pin_ok(manage_pin):
-                st.error("비밀번호는 4자리 숫자여야 해요. (예: 0123)")
+                st.error("비밀번호는 4자리여야 해요. (예: ab7@)")
             else:
                 # ✅ 새 계정은 '마지막 번호 + 1'로 저장 (students.no 사용)
                 if fs_get_student_doc_by_name(manage_name):
@@ -5269,7 +5269,7 @@ with st.sidebar:
             if not manage_name:
                 st.error("이름을 입력해 주세요.")
             elif not pin_ok(manage_pin):
-                st.error("새 비밀번호는 4자리 숫자여야 해요.")
+                st.error("새 비밀번호는 4자리여야 해요.")
             else:
                 res = api_admin_force_change_pin(admin_manage_pin, manage_name, manage_pin)
                 if res.get("ok"):
@@ -5297,7 +5297,7 @@ with st.sidebar:
                 if not manage_name:
                     st.error("삭제할 이름(계정)을 입력해 주세요.")
                 elif not pin_ok(manage_pin):
-                    st.error("비밀번호는 4자리 숫자여야 해요.")
+                    st.error("비밀번호는 4자리여야 해요.")
                 else:
                     # ✅ 여기서는 '해당 계정 PIN'이 아니라, '관리자 PIN'으로 삭제를 허용하려면
                     # api_delete_account가 (이름+PIN) 인증 구조라서 아래처럼 "관리자 강제 삭제"로 바꾸는 게 맞음.
@@ -5351,56 +5351,55 @@ if not st.session_state.logged_in:
         with login_c1:
             login_name = st.text_input("이름", key="login_name_input").strip()
         with login_c2:
-            login_pin = st.text_input("비밀번호(4자리)", type="password", key="login_pin_input").strip()
+            login_pin = st.text_input("비밀번호", type="password", key="login_pin_input").strip()
         with login_c3:
             login_btn = st.form_submit_button("로그인", use_container_width=True)
 
     if login_btn:
         if not login_name:
             st.error("이름을 입력해 주세요.")
-        elif not pin_ok(login_pin):
-            st.error("비밀번호는 4자리 숫자여야 해요.")
-        else:
-            if is_admin_login(login_name, login_pin):
-                st.session_state.admin_ok = True
-                st.session_state.logged_in = True
-                st.session_state.login_name = ADMIN_NAME
-                st.session_state.login_pin = ADMIN_PIN
-                st.session_state["login_student_ctx"] = {}
-                # ✅ 이름 저장 처리
-                try:
-                    if bool(st.session_state.get("remember_name_check", False)):
-                        st.query_params["saved_name"] = login_name
-                        st.query_params["remember"] = "1"
-                    else:
-                        st.query_params.pop("saved_name", None)
-                        st.query_params.pop("remember", None)
-                except Exception:
-                    pass
-                toast("관리자 모드 ON", icon="🔓")
-                st.rerun()
-            else:
-                doc = fs_auth_student(login_name, login_pin)
-                if not doc:
-                    st.error("이름 또는 비밀번호가 틀립니다.")
+        elif is_admin_login(login_name, login_pin):
+            st.session_state.admin_ok = True
+            st.session_state.logged_in = True
+            st.session_state.login_name = ADMIN_NAME
+            st.session_state.login_pin = ADMIN_PIN
+            st.session_state["login_student_ctx"] = {}
+            # ✅ 이름 저장 처리
+            try:
+                if bool(st.session_state.get("remember_name_check", False)):
+                    st.query_params["saved_name"] = login_name
+                    st.query_params["remember"] = "1"
                 else:
-                    st.session_state.admin_ok = False
-                    st.session_state.logged_in = True
-                    st.session_state.login_name = login_name
-                    st.session_state.login_pin = login_pin
-                    _set_login_student_context_from_doc(doc)
-                # ✅ 이름 저장 처리
-                try:
-                    if bool(st.session_state.get("remember_name_check", False)):
-                        st.query_params["saved_name"] = login_name
-                        st.query_params["remember"] = "1"
-                    else:
-                        st.query_params.pop("saved_name", None)
-                        st.query_params.pop("remember", None)
-                except Exception:
-                    pass
-                toast("로그인 완료!", icon="✅")
-                st.rerun()
+                    st.query_params.pop("saved_name", None)
+                    st.query_params.pop("remember", None)
+            except Exception:
+                pass
+            toast("관리자 모드 ON", icon="🔓")
+            st.rerun()
+        elif not pin_ok(login_pin):
+            st.error("학생 비밀번호는 4자리여야 해요.")
+        else:
+            doc = fs_auth_student(login_name, login_pin)
+            if not doc:
+                st.error("이름 또는 비밀번호가 틀립니다.")
+            else:
+                st.session_state.admin_ok = False
+                st.session_state.logged_in = True
+                st.session_state.login_name = login_name
+                st.session_state.login_pin = login_pin
+                _set_login_student_context_from_doc(doc)
+            # ✅ 이름 저장 처리
+            try:
+                if bool(st.session_state.get("remember_name_check", False)):
+                    st.query_params["saved_name"] = login_name
+                    st.query_params["remember"] = "1"
+                else:
+                    st.query_params.pop("saved_name", None)
+                    st.query_params.pop("remember", None)
+            except Exception:
+                pass
+            toast("로그인 완료!", icon="✅")
+            st.rerun()
 
 else:
     if st.button("로그아웃", key="logout_btn", use_container_width=True):
