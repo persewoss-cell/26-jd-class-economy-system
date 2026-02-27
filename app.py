@@ -6411,12 +6411,20 @@ if "🏦 내 통장" in tabs:
                 accounts_now = api_list_accounts_cached().get("accounts", [])
                 import re
 
-                def _num_key(acc):
+                def _student_no(acc):
+                    no = int(acc.get("no", 0) or 0)
+                    if no > 0:
+                        return no
+                        
                     name = str(acc.get("name", ""))
                     m = re.search(r"\d+", name)
-                    if m:
-                        return int(m.group())   # 1~9 → 01~09처럼 숫자 기준 정렬
-                    return 9999                # 번호 없으면 맨 뒤
+                    return int(m.group()) if m else 0
+
+                def _num_key(acc):
+                    no = _student_no(acc)
+                    if no > 0:
+                        return no              # 1~9 → 01~09처럼 숫자 기준 정렬
+                    return 9999               # 번호 없으면 맨 뒤
 
                 accounts_now = sorted(accounts_now, key=_num_key)
 
@@ -6436,11 +6444,10 @@ if "🏦 내 통장" in tabs:
                                     a = chunk[j]
                                     nm = str(a.get("name", "") or "")
                                     sid = str(a.get("student_id", "") or "")
-                                    import re
-                                    m = re.search(r"\d+", nm)
-                                    num = m.group() if m else "?"
+                                    num = _student_no(a)
+                                    num_txt = str(num) if num > 0 else "?"
 
-                                    label = f"{num}번 {nm}"
+                                    label = f"{num_txt}번 {nm}"
                                     ck = st.checkbox(label, key=f"admin_personal_pick_{sid}")
                                     if ck:
                                         selected_ids.append(sid)
@@ -7359,12 +7366,20 @@ if "admin::🏦 내 통장" in tabs:
                 accounts_now = api_list_accounts_cached().get("accounts", [])
                 import re
 
-                def _num_key(acc):
+                def _student_no(acc):
+                    no = int(acc.get("no", 0) or 0)
+                    if no > 0:
+                        return no
+                    
                     name = str(acc.get("name", ""))
                     m = re.search(r"\d+", name)
-                    if m:
-                        return int(m.group())   # 1~9 → 01~09처럼 숫자 기준 정렬
-                    return 9999                # 번호 없으면 맨 뒤
+                    return int(m.group()) if m else 0
+
+                def _num_key(acc):
+                    no = _student_no(acc)
+                    if no > 0:
+                        return no              # 1~9 → 01~09처럼 숫자 기준 정렬
+                    return 9999               # 번호 없으면 맨 뒤
 
                 accounts_now = sorted(accounts_now, key=_num_key)
 
@@ -7384,11 +7399,10 @@ if "admin::🏦 내 통장" in tabs:
                                     a = chunk[j]
                                     nm = str(a.get("name", "") or "")
                                     sid = str(a.get("student_id", "") or "")
-                                    import re
-                                    m = re.search(r"\d+", nm)
-                                    num = m.group() if m else "?"
+                                    num = _student_no(a)
+                                    num_txt = str(num) if num > 0 else "?"
 
-                                    label = f"{num}번 {nm}"
+                                    label = f"{num_txt}번 {nm}"
                                     ck = st.checkbox(label, key=f"admin_personal_pick_{sid}")
                                     if ck:
                                         selected_ids.append(sid)
