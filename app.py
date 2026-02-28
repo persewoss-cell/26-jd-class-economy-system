@@ -674,6 +674,12 @@ def _get_recorder_label(is_admin_action: bool, user_name: str = "", force_admin_
         return "관리자"
     return user_name
 
+def _get_admin_action_recorder(recorder_override: str = "") -> str:
+    override = str(recorder_override or "").strip()
+    if override:
+        return override
+    return _get_recorder_label(True, str(globals().get("login_name", "") or "").strip())
+    
 def format_kr_datetime(val) -> str:
     if val is None or val == "":
         return ""
@@ -1099,7 +1105,7 @@ def _render_user_bank_header(student_id: str):
         except Exception:
             bal_now = 0
 
-        # 적금 총 원금(전체)
+        # 적금 총 원금(진행중만: 해지/만기 제외)
         sv_total = 0
         try:
             sdocs = (
@@ -1109,7 +1115,9 @@ def _render_user_bank_header(student_id: str):
             )
             for d in sdocs:
                 s = d.to_dict() or {}
-                sv_total += int(s.get("principal", 0) or 0)
+                status = str(s.get("status", "")).lower().strip()
+                if status in ("active", "running"):
+                    sv_total += int(s.get("principal", 0) or 0)
         except Exception:
             sv_total = 0
 
@@ -1961,9 +1969,7 @@ def api_admin_add_tx_by_student_id(
 
     student_ref = db.collection("students").document(str(student_id))
     tx_ref = db.collection("transactions").document()
-    actor_name = str(globals().get("login_name", "") or "").strip()
-    actor_is_admin = bool(globals().get("is_admin", False))
-    recorder = str(recorder_override or "").strip() or ("관리자" if actor_is_admin else (f"관리자({actor_name})" if actor_name else "관리자"))
+    recorder = _get_admin_action_recorder(recorder_override)
     
     amount = deposit if deposit > 0 else -withdraw
     tx_type = "deposit" if deposit > 0 else "withdraw"
@@ -2066,7 +2072,7 @@ def api_broker_deposit_by_student_id(actor_student_id: str, student_id: str, mem
                     "amount": int(deposit),
                     "balance_after": new_bal,
                     "memo": memo,
-                    "recorder": f"관리자({actor_name})" if actor_name else "관리자",
+                    "recorder": _get_admin_action_recorder(),
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -2825,7 +2831,7 @@ def api_process_maturities(login_name: str, login_pin: str):
                     "amount": amount,
                     "balance_after": new_bal,
                     "memo": f"적금 만기({weeks}주)",
-                    "recorder": "관리자",
+                    "recorder": _get_recorder_label(False, str((student_doc.to_dict() or {}).get("name", "") or login_name or "")),
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -2881,9 +2887,7 @@ def api_add_treasury_tx(
 
     state_ref = db.collection("treasury").document("state")
     led_ref = db.collection("treasury_ledger").document()
-    actor_name = str(globals().get("login_name", "") or "").strip()
-    actor_is_admin = bool(globals().get("is_admin", False))
-    recorder = str(recorder_override or "").strip() or ("관리자" if actor_is_admin else (f"관리자({actor_name})" if actor_name else "관리자"))
+    recorder = _get_admin_action_recorder(recorder_override)
     
     amount = income if income > 0 else -expense
     tx_type = "income" if income > 0 else "expense"
@@ -2947,9 +2951,7 @@ def _treasury_apply_in_transaction(transaction, memo: str, signed_amount: int, a
 
     state_ref = db.collection("treasury").document("state")
     led_ref = db.collection("treasury_ledger").document()
-    actor_name = str(globals().get("login_name", "") or "").strip()
-    actor_is_admin = bool(globals().get("is_admin", False))
-    recorder = str(recorder_override or "").strip() or ("관리자" if actor_is_admin else (f"관리자({actor_name})" if actor_name else "관리자"))
+    recorder = _get_admin_action_recorder(recorder_override)
     
     if signed_amount > 0:
         tx_type = "income"
@@ -3096,9 +3098,7 @@ def api_admin_add_tx_by_student_id_with_treasury(
 
     student_ref = db.collection("students").document(student_id)
     tx_ref = db.collection("transactions").document()
-    actor_name = str(globals().get("login_name", "") or "").strip()
-    actor_is_admin = bool(globals().get("is_admin", False))
-    recorder = str(recorder_override or "").strip() or ("관리자" if actor_is_admin else (f"관리자({actor_name})" if actor_name else "관리자"))
+    recorder = _get_admin_action_recorder(recorder_override)
     
     amount = deposit if deposit > 0 else -withdraw
     tx_type = "deposit" if deposit > 0 else "withdraw"
@@ -3197,7 +3197,7 @@ def api_treasury_auto_bulk_adjust(memo: str, signed_amount: int, actor: str = "a
                 "balance_after": int(new_bal),
                 "memo": memo,
                 "actor": str(actor or ""),
-                "recorder": str(recorder_override or "").strip() or "관리자",
+                "recorder": _get_admin_action_recorder(recorder_override),
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -9076,7 +9076,7 @@ if "admin::🏦 은행(적금)" in tabs:
             if proc_cnt > 0:
                 toast(f"만기 자동 처리: {proc_cnt}건", icon="🏦")
 
-        def _cancel_savings(doc_id: str):
+        def _cancel_savings(doc_id: str, as_admin_action: bool = True):
             """
             중도해지:
             - 원금만 학생 통장에 입금(+)
@@ -9092,12 +9092,18 @@ if "admin::🏦 은행(적금)" in tabs:
             student_id = str(x.get("student_id") or "")
             principal = int(x.get("principal", 0) or 0)
 
+            recorder_override = _get_recorder_label(
+                bool(as_admin_action),
+                str(globals().get("login_name", "") or "").strip(),
+            )
+            
             res = api_admin_add_tx_by_student_id(
                 admin_pin=ADMIN_PIN,
                 student_id=student_id,
                 memo=f"적금 중도해지 지급 ({x.get('weeks')}주)",
                 deposit=principal,
                 withdraw=0,
+                recorder_override=recorder_override,
             )
             if res.get("ok"):
                 db.collection(SAV_COL).document(doc_id).update(
@@ -12318,7 +12324,7 @@ if "🏦 은행(적금)" in tabs:
             if proc_cnt > 0:
                 toast(f"만기 자동 처리: {proc_cnt}건", icon="🏦")
 
-        def _cancel_savings(doc_id: str):
+        def _cancel_savings(doc_id: str, as_admin_action: bool = True):
             """
             중도해지:
             - 원금만 학생 통장에 입금(+)
@@ -12334,12 +12340,18 @@ if "🏦 은행(적금)" in tabs:
             student_id = str(x.get("student_id") or "")
             principal = int(x.get("principal", 0) or 0)
 
+            recorder_override = _get_recorder_label(
+                bool(as_admin_action),
+                str(globals().get("login_name", "") or "").strip(),
+            )            
+            
             res = api_admin_add_tx_by_student_id(
                 admin_pin=ADMIN_PIN,
                 student_id=student_id,
                 memo=f"적금 중도해지 지급 ({x.get('weeks')}주)",
                 deposit=principal,
                 withdraw=0,
+                recorder_override=recorder_override,
             )
             if res.get("ok"):
                 db.collection(SAV_COL).document(doc_id).update(
@@ -12677,7 +12689,7 @@ div[data-testid="stDataFrame"] * { font-size: 0.80rem !important; }
                     if pick2 != "(선택 없음)":
                         if st.button("중도해지 실행", use_container_width=True, key="stu_bank_cancel_do"):
                             rid = str(lab_to_id.get(pick2))
-                            res = _cancel_savings(rid)
+                            res = _cancel_savings(rid, as_admin_action=False)
                             if res.get("ok"):
                                 toast("중도해지 완료", icon="✅")
                                 st.rerun()
