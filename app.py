@@ -662,6 +662,18 @@ def is_admin_login(name: str, pin: str) -> bool:
 def is_admin_pin(pin: str) -> bool:
     return str(pin or "").strip() == ADMIN_PIN
 
+def _get_recorder_label(is_admin_action: bool, user_name: str = "", force_admin_plain: bool = False) -> str:
+    user_name = str(user_name or "").strip()
+    if is_admin_action:
+        if bool(force_admin_plain):
+            return "관리자"
+        if bool(globals().get("is_admin", False)):
+            return "관리자"
+        if user_name:
+            return f"관리자({user_name})"
+        return "관리자"
+    return user_name
+
 def format_kr_datetime(val) -> str:
     if val is None or val == "":
         return ""
@@ -1415,6 +1427,7 @@ def api_admin_bulk_deposit(admin_pin: str, amount: int, memo: str):
         return {"ok": False, "error": "관리자 PIN이 틀립니다."}
     amount = int(amount or 0)
     memo = (memo or "").strip() or "일괄 지급"
+    recorder = _get_recorder_label(True, str(globals().get("login_name", "") or "").strip())
     if amount <= 0:
         return {"ok": False, "error": "금액은 1 이상이어야 합니다."}
 
@@ -1439,6 +1452,7 @@ def api_admin_bulk_deposit(admin_pin: str, amount: int, memo: str):
                     "amount": amount,
                     "balance_after": new_bal,
                     "memo": memo,
+                    "recorder": recorder,
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -1456,6 +1470,7 @@ def api_admin_bulk_withdraw(admin_pin: str, amount: int, memo: str):
         return {"ok": False, "error": "관리자 PIN이 틀립니다."}
     amount = int(amount or 0)
     memo = (memo or "").strip() or "일괄 벌금"
+    recorder = _get_recorder_label(True, str(globals().get("login_name", "") or "").strip())
     if amount <= 0:
         return {"ok": False, "error": "금액은 1 이상이어야 합니다."}
 
@@ -1480,6 +1495,7 @@ def api_admin_bulk_withdraw(admin_pin: str, amount: int, memo: str):
                     "amount": -amount,
                     "balance_after": new_bal,
                     "memo": memo,
+                    "recorder": recorder,
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -1879,6 +1895,7 @@ def api_add_tx(name, pin, memo, deposit, withdraw):
 
     student_ref = db.collection("students").document(student_doc.id)
     tx_ref = db.collection("transactions").document()
+    recorder = str((student_doc.to_dict() or {}).get("name", "") or name or "")
 
     amount = deposit if deposit > 0 else -withdraw
     tx_type = "deposit" if deposit > 0 else "withdraw"
@@ -1902,6 +1919,7 @@ def api_add_tx(name, pin, memo, deposit, withdraw):
                 "amount": int(amount),
                 "balance_after": int(new_bal),
                 "memo": memo,
+                "recorder": recorder,
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -1915,7 +1933,14 @@ def api_add_tx(name, pin, memo, deposit, withdraw):
     except Exception as e:
         return {"ok": False, "error": f"저장 실패: {e}"}
 
-def api_admin_add_tx_by_student_id(admin_pin: str, student_id: str, memo: str, deposit: int, withdraw: int):
+def api_admin_add_tx_by_student_id(
+    admin_pin: str,
+    student_id: str,
+    memo: str,
+    deposit: int,
+    withdraw: int,
+    recorder_override: str = "",
+):
     """
     ✅ 관리자 전용: 개별 학생에게 입금/출금
     - 국고 반영이 필요하면 api_admin_add_tx_by_student_id_with_treasury() 사용
@@ -1936,7 +1961,10 @@ def api_admin_add_tx_by_student_id(admin_pin: str, student_id: str, memo: str, d
 
     student_ref = db.collection("students").document(str(student_id))
     tx_ref = db.collection("transactions").document()
-
+    actor_name = str(globals().get("login_name", "") or "").strip()
+    actor_is_admin = bool(globals().get("is_admin", False))
+    recorder = str(recorder_override or "").strip() or ("관리자" if actor_is_admin else (f"관리자({actor_name})" if actor_name else "관리자"))
+    
     amount = deposit if deposit > 0 else -withdraw
     tx_type = "deposit" if deposit > 0 else "withdraw"
 
@@ -1961,6 +1989,7 @@ def api_admin_add_tx_by_student_id(admin_pin: str, student_id: str, memo: str, d
                 "amount": int(amount),
                 "balance_after": int(new_bal),
                 "memo": memo,
+                "recorder": recorder,
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -2002,6 +2031,7 @@ def api_broker_deposit_by_student_id(actor_student_id: str, student_id: str, mem
             if not actor_snap.exists:
                 return {"ok": False, "error": "권한 확인 실패(계정 없음)."}
             actor = actor_snap.to_dict() or {}
+            actor_name = str(actor.get("name", "") or "").strip()
             rid = str(actor.get("role_id", "") or "")
             if not rid:
                 return {"ok": False, "error": "투자 회수 권한이 없습니다."}
@@ -2036,6 +2066,7 @@ def api_broker_deposit_by_student_id(actor_student_id: str, student_id: str, mem
                     "amount": int(deposit),
                     "balance_after": new_bal,
                     "memo": memo,
+                    "recorder": f"관리자({actor_name})" if actor_name else "관리자",
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -2078,6 +2109,7 @@ def api_get_txs_by_student_id(student_id: str, limit=200):
                 "created_at_utc": created_dt_utc,
                 "created_at_kr": format_kr_datetime(created_dt_utc.astimezone(KST)) if created_dt_utc else "",
                 "memo": tx.get("memo", ""),
+                "recorder": str(tx.get("recorder", "") or ""),
                 "type": tx.get("type", ""),
                 "amount": amt,
                 "deposit": amt if amt > 0 else 0,
@@ -2256,6 +2288,7 @@ def api_admin_approve_deposit_request(admin_pin: str, request_id: str):
                 memo=treasury_memo,
                 signed_amount=int(-amount),
                 actor="deposit_approve",
+                recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
             )
 
         new_bal = int(bal + amount)
@@ -2271,6 +2304,7 @@ def api_admin_approve_deposit_request(admin_pin: str, request_id: str):
                 "amount": int(amount),
                 "balance_after": int(new_bal),
                 "memo": memo,
+                "recorder": _get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -2528,6 +2562,7 @@ def api_admin_rollback_selected(admin_pin: str, student_id: str, tx_ids: list[st
                     "treasury_signed": int(-orig_tre_signed),
                     "treasury_memo": str(rollback_memo),
                     "related_tx": tid,
+                    "recorder": _get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -2653,6 +2688,7 @@ def api_savings_create(login_name: str, login_pin: str, principal: int, weeks: i
                 "amount": -principal,
                 "balance_after": new_bal,
                 "memo": f"적금 가입({weeks}주)",
+                "recorder": str((student_doc.to_dict() or {}).get("name", "") or login_name or ""),
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -2722,6 +2758,7 @@ def api_savings_cancel(login_name: str, login_pin: str, savings_id: str):
                 "amount": principal,
                 "balance_after": new_bal,
                 "memo": f"적금 해지({weeks}주)",
+                "recorder": str((student_doc.to_dict() or {}).get("name", "") or login_name or ""),
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -2788,6 +2825,7 @@ def api_process_maturities(login_name: str, login_pin: str):
                     "amount": amount,
                     "balance_after": new_bal,
                     "memo": f"적금 만기({weeks}주)",
+                    "recorder": "관리자",
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -2815,7 +2853,14 @@ def api_get_treasury_state_cached():
     d = snap.to_dict() or {}
     return {"ok": True, "balance": int(d.get("balance", 0) or 0)}
 
-def api_add_treasury_tx(admin_pin: str, memo: str, income: int, expense: int, actor: str = "treasury"):
+def api_add_treasury_tx(
+    admin_pin: str,
+    memo: str,
+    income: int,
+    expense: int,
+    actor: str = "treasury",
+    recorder_override: str = "",
+):
     """
     국고 거래(세입/세출)
     - income: 세입(+) 입력
@@ -2836,7 +2881,10 @@ def api_add_treasury_tx(admin_pin: str, memo: str, income: int, expense: int, ac
 
     state_ref = db.collection("treasury").document("state")
     led_ref = db.collection("treasury_ledger").document()
-
+    actor_name = str(globals().get("login_name", "") or "").strip()
+    actor_is_admin = bool(globals().get("is_admin", False))
+    recorder = str(recorder_override or "").strip() or ("관리자" if actor_is_admin else (f"관리자({actor_name})" if actor_name else "관리자"))
+    
     amount = income if income > 0 else -expense
     tx_type = "income" if income > 0 else "expense"
 
@@ -2868,6 +2916,7 @@ def api_add_treasury_tx(admin_pin: str, memo: str, income: int, expense: int, ac
                 "balance_after": int(new_bal),
                 "memo": memo,
                 "actor": str(actor or ""),
+                "recorder": recorder,
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -2888,7 +2937,7 @@ def api_add_treasury_tx(admin_pin: str, memo: str, income: int, expense: int, ac
 #   - 사용자/관리자 거래에서 "국고 반영" 체크 시 사용
 #   - 관리자 PIN 없이도 동작(수업용 편의 기능)
 # =========================
-def _treasury_apply_in_transaction(transaction, memo: str, signed_amount: int, actor: str):
+def _treasury_apply_in_transaction(transaction, memo: str, signed_amount: int, actor: str, recorder_override: str = ""):
     """signed_amount: +세입 / -세출"""
     memo = str(memo or "").strip()
     signed_amount = int(signed_amount or 0)
@@ -2898,7 +2947,10 @@ def _treasury_apply_in_transaction(transaction, memo: str, signed_amount: int, a
 
     state_ref = db.collection("treasury").document("state")
     led_ref = db.collection("treasury_ledger").document()
-
+    actor_name = str(globals().get("login_name", "") or "").strip()
+    actor_is_admin = bool(globals().get("is_admin", False))
+    recorder = str(recorder_override or "").strip() or ("관리자" if actor_is_admin else (f"관리자({actor_name})" if actor_name else "관리자"))
+    
     if signed_amount > 0:
         tx_type = "income"
         income = int(signed_amount)
@@ -2933,6 +2985,7 @@ def _treasury_apply_in_transaction(transaction, memo: str, signed_amount: int, a
             "balance_after": int(new_bal),
             "memo": memo,
             "actor": str(actor or ""),
+            "recorder": recorder,
             "created_at": firestore.SERVER_TIMESTAMP,
         },
     )
@@ -2955,6 +3008,7 @@ def api_add_tx_with_treasury(name, pin, memo, deposit, withdraw, apply_treasury:
 
     student_ref = db.collection("students").document(student_doc.id)
     tx_ref = db.collection("transactions").document()
+    recorder = str((student_doc.to_dict() or {}).get("name", "") or name or "")
 
     amount = deposit if deposit > 0 else -withdraw
     tx_type = "deposit" if deposit > 0 else "withdraw"
@@ -2982,6 +3036,7 @@ def api_add_tx_with_treasury(name, pin, memo, deposit, withdraw, apply_treasury:
                 memo=str(treasury_memo or memo),
                 signed_amount=int(tre_signed),
                 actor=str(actor or "auto"),
+                recorder_override=recorder,
             )
 
         new_bal = bal + amount
@@ -2994,6 +3049,7 @@ def api_add_tx_with_treasury(name, pin, memo, deposit, withdraw, apply_treasury:
                 "amount": amount,
                 "balance_after": new_bal,
                 "memo": memo,
+                "recorder": recorder,
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -3012,7 +3068,17 @@ def api_add_tx_with_treasury(name, pin, memo, deposit, withdraw, apply_treasury:
         return {"ok": False, "error": f"저장 실패: {e}"}
 
 
-def api_admin_add_tx_by_student_id_with_treasury(admin_pin: str, student_id: str, memo: str, deposit: int, withdraw: int, apply_treasury: bool, treasury_memo: str, actor: str = "admin_auto"):
+def api_admin_add_tx_by_student_id_with_treasury(
+    admin_pin: str,
+    student_id: str,
+    memo: str,
+    deposit: int,
+    withdraw: int,
+    apply_treasury: bool,
+    treasury_memo: str,
+    actor: str = "admin_auto",
+    recorder_override: str = "",
+):
     """관리자 개별 지급/벌금 + (선택)국고 반영"""
     if not is_admin_pin(admin_pin):
         return {"ok": False, "error": "관리자 PIN이 틀립니다."}
@@ -3030,7 +3096,10 @@ def api_admin_add_tx_by_student_id_with_treasury(admin_pin: str, student_id: str
 
     student_ref = db.collection("students").document(student_id)
     tx_ref = db.collection("transactions").document()
-
+    actor_name = str(globals().get("login_name", "") or "").strip()
+    actor_is_admin = bool(globals().get("is_admin", False))
+    recorder = str(recorder_override or "").strip() or ("관리자" if actor_is_admin else (f"관리자({actor_name})" if actor_name else "관리자"))
+    
     amount = deposit if deposit > 0 else -withdraw
     tx_type = "deposit" if deposit > 0 else "withdraw"
 
@@ -3054,6 +3123,7 @@ def api_admin_add_tx_by_student_id_with_treasury(admin_pin: str, student_id: str
                 memo=str(treasury_memo or memo),
                 signed_amount=int(tre_signed),
                 actor=str(actor or "auto"),
+                recorder_override=recorder,
             )
 
         new_bal = bal + amount
@@ -3066,6 +3136,7 @@ def api_admin_add_tx_by_student_id_with_treasury(admin_pin: str, student_id: str
                 "amount": amount,
                 "balance_after": new_bal,
                 "memo": memo,
+                "recorder": recorder,
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -3084,7 +3155,7 @@ def api_admin_add_tx_by_student_id_with_treasury(admin_pin: str, student_id: str
         return {"ok": False, "error": f"저장 실패: {e}"}
 
 
-def api_treasury_auto_bulk_adjust(memo: str, signed_amount: int, actor: str = "admin_bulk_auto"):
+def api_treasury_auto_bulk_adjust(memo: str, signed_amount: int, actor: str = "admin_bulk_auto", recorder_override: str = ""):
     """일괄 지급/벌금 시 국고를 한 번만 합산 반영"""
     memo = str(memo or "").strip()
     signed_amount = int(signed_amount or 0)
@@ -3126,6 +3197,7 @@ def api_treasury_auto_bulk_adjust(memo: str, signed_amount: int, actor: str = "a
                 "balance_after": int(new_bal),
                 "memo": memo,
                 "actor": str(actor or ""),
+                "recorder": str(recorder_override or "").strip() or "관리자",
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -3157,6 +3229,7 @@ def api_list_treasury_ledger_cached(limit=300):
                 "created_at_kr": format_kr_datetime(created_dt_utc.astimezone(KST)) if created_dt_utc else "",
                 "memo": str(x.get("memo", "") or ""),
                 "income": int(x.get("income", 0) or 0),
+                "recorder": str(x.get("recorder", "") or ""),
                 "expense": int(x.get("expense", 0) or 0),
                 "balance_after": int(x.get("balance_after", 0) or 0),
             }
@@ -3779,6 +3852,7 @@ def api_submit_auction_bid(name: str, pin: str, amount: int):
                 "amount": int(-amount),
                 "balance_after": int(new_bal),
                 "memo": memo,
+                "recorder": str(student_name or name or ""),
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -3952,6 +4026,7 @@ def api_apply_auction_ledger(admin_pin: str, round_id: str, refund_non_winners: 
                     "amount": int(payback_amt),
                     "balance_after": int(new_bal),
                     "memo": f"[경매 {int(r.get('round_no', 0) or 0):02d}회] 낙찰 실패 입찰금 반환(수수료 10% 차감)",
+                    "recorder": "관리자",
                     "created_at": firestore.SERVER_TIMESTAMP,
                 }
             )
@@ -3975,7 +4050,7 @@ def api_apply_auction_ledger(admin_pin: str, round_id: str, refund_non_winners: 
     if refund_non_winners and fee_total > 0:
         fee_res = api_add_treasury_tx(
             ADMIN_PIN,
-            "낙잘금 수수료 총액",
+            "낙찰금 수수료 총액",
             income=int(fee_total),
             expense=0,
             actor="auction",
@@ -4377,6 +4452,7 @@ def api_submit_lottery_entry(name: str, pin: str, numbers: list[int]):
                 "amount": int(-price),
                 "balance_after": int(new_bal),
                 "memo": f"복권 {int(round_no)}회 구매",
+                "recorder": str(s.get("name", "") or name or ""),
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -4463,6 +4539,7 @@ def api_submit_lottery_entries(name: str, pin: str, games: list[list[int]]):
                 "amount": int(-total_price),
                 "balance_after": int(new_bal),
                 "memo": f"복권 {int(round_no)}회 {len(normalized_games)}게임 구매",
+                "recorder": str(s.get("name", "") or name or ""),
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         )
@@ -4723,6 +4800,7 @@ def api_pay_lottery_prizes(admin_pin: str, round_id: str):
             memo=f"복권 {int(r.get('round_no', 0) or 0)}회 {rank}등 당첨금",
             deposit=int(prize),
             withdraw=0,
+            recorder_override="관리자",
         )
         if not res.get("ok"):
             return {"ok": False, "error": f"당첨금 지급 실패: {res.get('error', 'unknown')}"}
@@ -5451,6 +5529,14 @@ is_admin = bool(st.session_state.admin_ok)
 login_name = st.session_state.login_name
 login_pin = st.session_state.login_pin
 
+# ✅ 학생 로그인 컨텍스트를 매 실행마다 최신화
+# - 관리자 페이지에서 권한/역할을 변경해도 학생이 즉시 탭 권한을 반영하도록 함
+if not is_admin and login_name and login_pin:
+    latest_doc = fs_auth_student(login_name, login_pin)
+    if latest_doc:
+        _set_login_student_context_from_doc(latest_doc)
+
+
 my_student_id = None
 student_ctx = _get_login_student_context()
 if not is_admin:
@@ -5708,10 +5794,13 @@ def render_tx_table(df_tx: pd.DataFrame):
             "deposit": "입금",
             "withdraw": "출금",
             "balance_after": "총액",
+            "recorder": "기록자",
         }
     )
+    if "기록자" not in view.columns:
+        view["기록자"] = ""
     st.dataframe(
-        view[["내역", "입금", "출금", "총액", "날짜-시간"]],
+        view[["내역", "입금", "출금", "총액", "날짜-시간", "기록자"]],
         use_container_width=True,
         hide_index=True,
     )
@@ -5803,6 +5892,7 @@ if "🏦 내 통장" in tabs:
                                                 memo=f"전체 {memo_bulk}".strip(),
                                                 signed_amount=-(int(dep_bulk) * cnt),
                                                 actor="전체",
+                                                recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                                             )
                                     st.rerun()
                                 else:
@@ -5819,6 +5909,7 @@ if "🏦 내 통장" in tabs:
                                                 memo=f"전체 {memo_bulk}".strip(),
                                                 signed_amount=(int(wd_bulk) * cnt),
                                                 actor="전체",
+                                                recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                                             )
                                     st.rerun()
                                 else:
@@ -6758,6 +6849,7 @@ if "admin::🏦 내 통장" in tabs:
                                                 memo=f"전체 {memo_bulk}".strip(),
                                                 signed_amount=-(int(dep_bulk) * cnt),
                                                 actor="전체",
+                                                recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                                             )
                                     st.rerun()
                                 else:
@@ -6774,6 +6866,7 @@ if "admin::🏦 내 통장" in tabs:
                                                 memo=f"전체 {memo_bulk}".strip(),
                                                 signed_amount=(int(wd_bulk) * cnt),
                                                 actor="전체",
+                                                recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                                             )
                                     st.rerun()
                                 else:
@@ -8968,6 +9061,7 @@ if "admin::🏦 은행(적금)" in tabs:
                         memo=memo,
                         deposit=payout,
                         withdraw=0,
+                        recorder_override="관리자",
                     )
                     if res.get("ok"):
                         db.collection(SAV_COL).document(d.id).update(
@@ -9041,9 +9135,9 @@ if "admin::🏦 은행(적금)" in tabs:
             maturity_utc = now_utc + timedelta(days=int(weeks) * 7)
 
             # 1) 통장에서 출금(적금 넣기)
-            res_wd = api_admin_add_tx_by_student_id(
-                admin_pin=ADMIN_PIN,
-                student_id=student_id,
+            res_wd = api_add_tx(
+                name=str(login_name),
+                pin=str(login_pin),
                 memo=f"적금 가입 ({weeks}주)",
                 deposit=0,
                 withdraw=principal,
@@ -9988,7 +10082,7 @@ if "💼 직업/월급" in tabs:
                 merge=True,
             )
 
-        def _pay_one_student(student_id: str, amount: int, memo: str):
+        def _pay_one_student(student_id: str, amount: int, memo: str, recorder_override: str = ""):
             # 관리자 지급으로 통장 입금(+)
             return api_admin_add_tx_by_student_id(
                 admin_pin=ADMIN_PIN,
@@ -9996,6 +10090,7 @@ if "💼 직업/월급" in tabs:
                 memo=memo,
                 deposit=int(amount),
                 withdraw=0,
+                recorder_override=str(recorder_override or "").strip(),
             )
 
         def _run_auto_payroll_if_due(cfg_pay: dict):
@@ -10043,7 +10138,7 @@ if "💼 직업/월급" in tabs:
 
                     nm = id_to_name.get(sid, "")
                     memo = f"월급 {job_name}"
-                    res = _pay_one_student(sid, net_amt, memo)
+                    res = _pay_one_student(sid, net_amt, memo, recorder_override="관리자")
                                         # ✅ (국고 세입) 월급 공제액을 국고로 입금
                     deduction = int(max(0, gross - net_amt))
                     if deduction > 0:
@@ -10053,6 +10148,7 @@ if "💼 직업/월급" in tabs:
                             income=deduction,
                             expense=0,
                             actor="system_salary",
+                            recorder_override="관리자",
                         )
                     if res.get("ok"):
                         _write_paylog(mkey, sid, net_amt, job_name, method="auto", job_id=job_id)
@@ -10920,10 +11016,13 @@ if "🏛️ 국세청(국고)" in tabs:
                     "expense": "세출",
                     "balance_after": "총액",
                     "created_at_kr": "날짜-시간",
+                    "recorder": "기록자",
                 }
             )
+            if "기록자" not in view.columns:
+                view["기록자"] = ""
             st.dataframe(
-                view[["내역", "세입", "세출", "총액", "날짜-시간"]],
+                view[["내역", "세입", "세출", "총액", "날짜-시간", "기록자"]],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -12204,6 +12303,7 @@ if "🏦 은행(적금)" in tabs:
                         memo=memo,
                         deposit=payout,
                         withdraw=0,
+                        recorder_override="관리자",
                     )
                     if res.get("ok"):
                         db.collection(SAV_COL).document(d.id).update(
@@ -12277,9 +12377,9 @@ if "🏦 은행(적금)" in tabs:
             maturity_utc = now_utc + timedelta(days=int(weeks) * 7)
 
             # 1) 통장에서 출금(적금 넣기)
-            res_wd = api_admin_add_tx_by_student_id(
-                admin_pin=ADMIN_PIN,
-                student_id=student_id,
+            res_wd = api_add_tx(
+                name=str(login_name),
+                pin=str(login_pin),
                 memo=f"적금 가입 ({weeks}주)",
                 deposit=0,
                 withdraw=principal,
@@ -13637,4 +13737,3 @@ if "🎯 목표" in tabs and (not is_admin):
 
         if principal_all_running == 0 and interest_before_goal == 0:
             st.caption("진행 중 적금이 없어 예상 금액은 통장 잔액과 같아요.")
-
