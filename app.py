@@ -200,6 +200,24 @@ st.markdown(
     }
     .tpl-sub { color:#666; font-size: 0.85rem; margin-top: 2px; line-height: 1.05; }
 
+    /* 투자 탭: 종목별 주가 변동 내역 표 */
+    table.inv_hist_table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        line-height: 1.15;
+    }
+    table.inv_hist_table th, table.inv_hist_table td {
+        padding: 6px 8px;
+        border: 1px solid rgba(0,0,0,0.08);
+        vertical-align: middle;
+    }
+    table.inv_hist_table th {
+        font-weight: 700;
+        background: rgba(0,0,0,0.03);
+        text-align: center;
+    }
+
 /* ✅ stat_cellpick_ 전용: 선택 색상(순서 기반) */
 
 /* (중요) 기본 선택 배경 리셋은 "stat_cellpick_"에만 적용 */
@@ -1405,7 +1423,7 @@ def api_list_templates_cached():
     templates.sort(key=lambda x: (int(x.get("order", 999999)), str(x.get("label", ""))))
     return {"ok": True, "templates": templates}
 # =========================
-# ✅ (관리자) 보상/벌금용 helpers
+# ✅ (관리자) 입금/출금용 helpers
 # - templates 컬렉션: {label, category?, base_label?, kind, amount, order}
 # =========================
 def _parse_template_label(label: str):
@@ -1473,11 +1491,11 @@ def api_admin_bulk_deposit(admin_pin: str, amount: int, memo: str):
 
 
 def api_admin_bulk_withdraw(admin_pin: str, amount: int, memo: str):
-    """✅ 전체 일괄 벌금(잔액 부족이어도 적용 → 음수 허용)"""
+    """✅ 전체 일괄 출금(잔액 부족이어도 적용 → 음수 허용)"""
     if not is_admin_pin(admin_pin):
         return {"ok": False, "error": "관리자 PIN이 틀립니다."}
     amount = int(amount or 0)
-    memo = (memo or "").strip() or "일괄 벌금"
+    memo = (memo or "").strip() or "일괄 출금"
     recorder = _get_recorder_label(True, str(globals().get("login_name", "") or "").strip())
     if amount <= 0:
         return {"ok": False, "error": "금액은 1 이상이어야 합니다."}
@@ -3081,7 +3099,7 @@ def api_admin_add_tx_by_student_id_with_treasury(
     actor: str = "admin_auto",
     recorder_override: str = "",
 ):
-    """관리자 개별 지급/벌금 + (선택)국고 반영"""
+    """관리자 개별 지급/출금 + (선택)국고 반영"""
     if not is_admin_pin(admin_pin):
         return {"ok": False, "error": "관리자 PIN이 틀립니다."}
 
@@ -3156,7 +3174,7 @@ def api_admin_add_tx_by_student_id_with_treasury(
 
 
 def api_treasury_auto_bulk_adjust(memo: str, signed_amount: int, actor: str = "admin_bulk_auto", recorder_override: str = ""):
-    """일괄 지급/벌금 시 국고를 한 번만 합산 반영"""
+    """일괄 지급/출금 시 국고를 한 번만 합산 반영"""
     memo = str(memo or "").strip()
     signed_amount = int(signed_amount or 0)
     if (not memo) or signed_amount == 0:
@@ -5604,7 +5622,7 @@ def tab_visible(tab_name: str):
 if is_admin:
     tabs = [t for t in ALL_TABS if tab_visible(t)]
     # ✅ 관리자 탭에서만 '🏦 내 통장' 탭 이름을 변경(학생 탭에는 영향 없음)
-    tabs_display = [("💰보상/벌금" if t == "🏦 내 통장" else t) for t in tabs]
+    tabs_display = [("💰입금/출금" if t == "🏦 내 통장" else t) for t in tabs]
     tab_objs = st.tabs(tabs_display)
     tab_map = {name: tab_objs[i] for i, name in enumerate(tabs)}
 else:
@@ -5621,7 +5639,7 @@ else:
     # -------------------------
     # ✅ 학생 기본 탭(거래/적금/투자/목표)
     # -------------------------
-    base_labels = ["📝 거래", "🏦 적금", "📊 통계/신용"]
+    base_labels = ["📝 통장/거래", "🏦 적금", "📊 통계/신용"]
     if inv_ok:
         base_labels.append("📈 투자")
     base_labels.append("🎯 목표")
@@ -5636,7 +5654,7 @@ else:
     extra_admin_tabs = []
 
     # 1) 관리자 기능(같은 탭 안에 있던 관리자 UI)을 별도 탭으로 빼서 제공
-    #    ※ 이 탭을 만들면, 원래 탭(📝 거래/🏦 적금/📈 투자)에서는 학생에게 관리자 UI를 숨깁니다.
+    #    ※ 이 탭을 만들면, 원래 탭(📝 통장/거래/🏦 적금/📈 투자)에서는 학생에게 관리자 UI를 숨깁니다.
     def _append_extra_tab(label: str, key_internal: str):
         # 사용자 기본 탭과 중복 라벨이 생기지 않도록 방지
         if label in base_labels:
@@ -5646,7 +5664,7 @@ else:
         extra_admin_tabs.append((label, key_internal))
 
     if has_admin_feature_access(my_perms, "🏦 내 통장", is_admin=False):
-        _append_extra_tab("💰보상/벌금(관리자)", "admin::🏦 내 통장")
+        _append_extra_tab("💰입금/출금(관리자)", "admin::🏦 내 통장")
 
     if has_admin_feature_access(my_perms, "🏦 은행(적금)", is_admin=False):
         _append_extra_tab("🏦 은행(적금)(관리자)", "admin::🏦 은행(적금)")
@@ -5848,7 +5866,7 @@ if "🏦 내 통장" in tabs:
         trade_admin_ok = bool(is_admin)  # ✅ 학생은 여기서 관리자 UI를 숨기고, 별도 관리자 탭(admin::🏦 내 통장)에서만 표시
         if trade_admin_ok:
 
-            # ✅ (보상/벌금) 내부 작은 탭
+            # ✅ (입금/출금) 내부 작은 탭
             sub_tab_all, sub_tab_personal = st.tabs(["전체", "개인"])
 
             # =================================================
@@ -5856,9 +5874,9 @@ if "🏦 내 통장" in tabs:
             # =================================================
             with sub_tab_all:
                 # -------------------------------------------------
-                # 1) 전체 일괄 지급/벌금
+                # 1) 전체 일괄 지급/출금
                 # -------------------------------------------------
-                st.markdown("### 🎁 전체 일괄 지급/벌금")
+                st.markdown("### 🎁 전체 일괄 입금/출금")
 
                 tpl_res3 = api_list_templates_cached()
                 templates3 = tpl_res3.get("templates", []) if tpl_res3.get("ok") else []
@@ -5900,8 +5918,8 @@ if "🏦 내 통장" in tabs:
                             else:
                                 res = api_admin_bulk_withdraw(ADMIN_PIN, wd_bulk, memo_bulk)
                                 if res.get("ok"):
-                                    toast(f"벌금 완료! (적용 {res.get('count')}명)", icon="⚠️")
-                                    # ✅ 국고 반영(체크 시): 전체 벌금 → 국고 세입(합산)
+                                    toast(f"출금 완료! (적용 {res.get('count')}명)", icon="⚠️")
+                                    # ✅ 국고 반영(체크 시): 전체 출금 → 국고 세입(합산)
                                     if tre_apply_bulk:
                                         cnt = int(res.get("count", 0) or 0)
                                         if cnt > 0:
@@ -5913,7 +5931,7 @@ if "🏦 내 통장" in tabs:
                                             )
                                     st.rerun()
                                 else:
-                                    st.error(res.get("error", "일괄 벌금 실패"))
+                                    st.error(res.get("error", "일괄 출금 실패"))
 
                 with b2:
                     if st.button("되돌리기(관리자)", key="admin_bulk_reward_undo_toggle", use_container_width=True):
@@ -6495,7 +6513,7 @@ if "🏦 내 통장" in tabs:
                             st.error(f"저장 실패: {e}")
             
             # =================================================
-            # [개인] : 체크된 학생만 “일괄 지급/벌금” 적용
+            # [개인] : 체크된 학생만 “일괄 입금/출금” 적용
             # =================================================
             with sub_tab_personal:
                 st.markdown("### 👥 대상 학생 선택 (체크한 학생만 적용)")
@@ -6549,7 +6567,7 @@ if "🏦 내 통장" in tabs:
                     if selected_names:
                         st.caption("선택됨: " + " · ".join(selected_names))
 
-                    st.markdown("### 🎁 개인 지급/벌금")
+                    st.markdown("### 🎁 개인 입금/출금")
 
                     tpl_res_p = api_list_templates_cached()
                     templates_p = tpl_res_p.get("templates", []) if tpl_res_p.get("ok") else []
@@ -6631,7 +6649,7 @@ if "🏦 내 통장" in tabs:
                 st.stop()
 
             # ✅ 거래 기록 (DuplicateElementKey 방지: prefix를 탭 전용으로 변경)
-            st.subheader("📝 통장 기록하기")
+            st.subheader("📝 통장 입금/출금하기")
             _tpl_state = _get_trade_templates_state()
             memo_u, dep_u, wd_u = render_admin_trade_ui(
                 prefix=f"bank_trade_{login_name}",
@@ -6784,7 +6802,7 @@ if "🏦 내 통장" in tabs:
                             else:
                                 st.error(res2.get("error", "되돌리기 실패"))
 
-            st.subheader("📒 통장 내역(최신순)")
+            st.subheader("📒 통장 거래 내역(최신순)")
             render_tx_table(df_tx)
 
 # =========================
@@ -6796,16 +6814,16 @@ if "🏦 내 통장" in tabs:
 # =========================
 
 # =========================
-# (학생) 💰보상/벌금(관리자) — 별도 탭 (admin::🏦 내 통장)
+# (학생) 💰입금/출금(관리자) — 별도 탭 (admin::🏦 내 통장)
 # =========================
 if "admin::🏦 내 통장" in tabs:
     with tab_map["admin::🏦 내 통장"]:
-        st.subheader("💰보상/벌금 부여")
+        st.subheader("💰입금/출금 적용")
         if is_admin:
-            st.info("관리자 모드에서는 상단 '💰보상/벌금' 탭에서 사용합니다.")
+            st.info("관리자 모드에서는 상단 '💰입금/출금' 탭에서 사용합니다.")
         else:
 
-            # ✅ (보상/벌금) 내부 작은 탭
+            # ✅ (입금/출금) 내부 작은 탭
             sub_tab_all, sub_tab_personal = st.tabs(["전체", "개인"])
 
             # =================================================
@@ -6813,9 +6831,9 @@ if "admin::🏦 내 통장" in tabs:
             # =================================================
             with sub_tab_all:
                 # -------------------------------------------------
-                # 1) 전체 일괄 지급/벌금
+                # 1) 전체 일괄 입금/출금
                 # -------------------------------------------------
-                st.markdown("### 🎁 전체 일괄 지급/벌금")
+                st.markdown("### 🎁 전체 일괄 입금/출금")
 
                 tpl_res3 = api_list_templates_cached()
                 templates3 = tpl_res3.get("templates", []) if tpl_res3.get("ok") else []
@@ -6840,8 +6858,8 @@ if "admin::🏦 내 통장" in tabs:
                             if dep_bulk > 0:
                                 res = api_admin_bulk_deposit(ADMIN_PIN, dep_bulk, memo_bulk)
                                 if res.get("ok"):
-                                    toast(f"일괄 지급 완료! ({res.get('count')}명)", icon="🎉")
-                                    # ✅ 국고 반영(체크 시): 전체 지급 → 국고 세출(합산)
+                                    toast(f"일괄 입금 완료! ({res.get('count')}명)", icon="🎉")
+                                    # ✅ 국고 반영(체크 시): 전체 입금 → 국고 세출(합산)
                                     if tre_apply_bulk:
                                         cnt = int(res.get("count", 0) or 0)
                                         if cnt > 0:
@@ -6853,12 +6871,12 @@ if "admin::🏦 내 통장" in tabs:
                                             )
                                     st.rerun()
                                 else:
-                                    st.error(res.get("error", "일괄 지급 실패"))
+                                    st.error(res.get("error", "일괄 입금 실패"))
                             else:
                                 res = api_admin_bulk_withdraw(ADMIN_PIN, wd_bulk, memo_bulk)
                                 if res.get("ok"):
-                                    toast(f"벌금 완료! (적용 {res.get('count')}명)", icon="⚠️")
-                                    # ✅ 국고 반영(체크 시): 전체 벌금 → 국고 세입(합산)
+                                    toast(f"출금 완료! (적용 {res.get('count')}명)", icon="⚠️")
+                                    # ✅ 국고 반영(체크 시): 전체 출금 → 국고 세입(합산)
                                     if tre_apply_bulk:
                                         cnt = int(res.get("count", 0) or 0)
                                         if cnt > 0:
@@ -6870,7 +6888,7 @@ if "admin::🏦 내 통장" in tabs:
                                             )
                                     st.rerun()
                                 else:
-                                    st.error(res.get("error", "일괄 벌금 실패"))
+                                    st.error(res.get("error", "일괄 출금 실패"))
 
                 with b2:
                     if st.button("되돌리기(관리자)", key="admin_bulk_reward_undo_toggle", use_container_width=True):
@@ -7452,7 +7470,7 @@ if "admin::🏦 내 통장" in tabs:
                             st.error(f"저장 실패: {e}")
             
             # =================================================
-            # [개인] : 체크된 학생만 “일괄 지급/벌금” 적용
+            # [개인] : 체크된 학생만 “일괄 입금/출금” 적용
             # =================================================
             with sub_tab_personal:
                 st.markdown("### 👥 대상 학생 선택 (체크한 학생만 적용)")
@@ -7506,7 +7524,7 @@ if "admin::🏦 내 통장" in tabs:
                     if selected_names:
                         st.caption("선택됨: " + " · ".join(selected_names))
 
-                    st.markdown("### 🎁 개인 지급/벌금")
+                    st.markdown("### 🎁 개인 입금/출금")
 
                     tpl_res_p = api_list_templates_cached()
                     templates_p = tpl_res_p.get("templates", []) if tpl_res_p.get("ok") else []
@@ -7590,31 +7608,6 @@ def _render_invest_admin_like(*, inv_admin_ok_flag: bool, force_is_admin: bool, 
     INV_LEDGER_COL = "invest_ledger"
     
     
-    # ✅ (PATCH) 투자 탭 - 종목별 '주가 변동 내역' 표 글자/패딩 축소 전용 CSS
-    st.markdown(
-        """
-        <style>
-        table.inv_hist_table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-            line-height: 1.15;
-        }
-        table.inv_hist_table th, table.inv_hist_table td {
-            padding: 6px 8px;
-            border: 1px solid rgba(0,0,0,0.08);
-            vertical-align: middle;
-        }
-        table.inv_hist_table th {
-            font-weight: 700;
-            background: rgba(0,0,0,0.03);
-            text-align: center;  /* ✅ 제목셀만 중앙정렬 */
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
 # -------------------------
     # 유틸(함수 대신 안전하게 inline)
     # -------------------------
@@ -9463,7 +9456,7 @@ if "👥 계정 정보/활성화" in tabs:
         #
         # 1) "tab::<탭이름>"  : 학생에게 '관리자 탭' 자체를 추가로 노출(기본 탭이 아닌 것들)
         # 2) "admin::<탭이름>": 이미 학생에게 기본으로 보이는 탭 안에서 '관리자 기능(관리 UI)'을 열어줌
-        #    - 💰보상/벌금(관리자)  -> admin::🏦 내 통장
+        #    - 💰입금/출금(관리자)  -> admin::🏦 내 통장
         #    - 🏦 은행(적금)(관리자)      -> admin::🏦 은행(적금)
         #    - 📈 투자(관리자)            -> admin::📈 투자
         # -------------------------------------------------
@@ -9473,7 +9466,7 @@ if "👥 계정 정보/활성화" in tabs:
         # ✅ 부여 가능한 항목(탭/관리자기능)
         # - (관리자기능) 항목은 학생에게 기본으로 보이는 탭 안에서 관리자 UI를 열어주는 용도입니다.
         GRANT_OPTIONS = [
-            ("💰보상/벌금(관리자)", ("admin", "🏦 내 통장")),
+            ("💰입금/출금(관리자)", ("admin", "🏦 내 통장")),
             ("🏦 은행(적금)(관리자)", ("admin", "🏦 은행(적금)")),
             ("📈 투자(관리자)", ("admin", "📈 투자")),
         ] + [
@@ -9638,7 +9631,7 @@ if "👥 계정 정보/활성화" in tabs:
             admin_disp = []
             for t in admin_tabs:
                 if t == "🏦 내 통장":
-                    admin_disp.append("💰보상/벌금(관리자)")
+                    admin_disp.append("💰입금/출금(관리자)")
                 elif t == "🏦 은행(적금)":
                     admin_disp.append("🏦 은행(적금)(관리자)")
                 elif t == "📈 투자":
@@ -13667,7 +13660,7 @@ if "🎯 목표" in tabs and (not is_admin):
             else:
                 dday_text = f"(D+{abs(_dday):02d}일)"
             title_ph.markdown(
-                f"## 🎯 나의 목표 자산 <span style='font-size:0.75em;color:#777;'>{dday_text}</span>",
+                f"### 🎯 나의 목표 자산 <span style='font-size:0.75em;color:#777;'>{dday_text}</span>",
                 unsafe_allow_html=True,
             )
 
