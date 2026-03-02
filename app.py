@@ -1725,11 +1725,37 @@ def api_admin_upsert_stat_template(admin_pin: str, template_id: str, label: str,
     if order <= 0:
         return {"ok": False, "error": "순서는 1 이상이어야 합니다."}
 
-    payload = {"label": label, "order": order, "created_at": firestore.SERVER_TIMESTAMP}
-    if template_id:
-        db.collection("stat_templates").document(template_id).set(payload, merge=True)
-    else:
-        db.collection("stat_templates").document().set(payload)
+    docs = list(db.collection("stat_templates").stream())
+    rows = []
+    for d in docs:
+        t = d.to_dict() or {}
+        rows.append(
+            {
+                "template_id": d.id,
+                "label": str(t.get("label", "") or ""),
+                "order": int(t.get("order", 999999) or 999999),
+            }
+        )
+
+    is_update = bool(template_id and any(r["template_id"] == template_id for r in rows))
+    target_id = template_id if is_update else db.collection("stat_templates").document().id
+
+    # 대상 제외 후 현재 순서대로 정렬 → 원하는 위치에 끼워 넣은 뒤 1..N으로 재배치
+    others = [r for r in rows if r["template_id"] != target_id]
+    others.sort(key=lambda x: (int(x.get("order", 999999)), str(x.get("label", ""))))
+
+    insert_at = max(1, int(order))
+    insert_idx = min(insert_at - 1, len(others))
+    others.insert(insert_idx, {"template_id": target_id, "label": label})
+
+    batch = db.batch()
+    for idx, row in enumerate(others, start=1):
+        ref = db.collection("stat_templates").document(str(row["template_id"]))
+        payload = {"label": str(row.get("label", "") or ""), "order": idx}
+        if row["template_id"] == target_id and not is_update:
+            payload["created_at"] = firestore.SERVER_TIMESTAMP
+        batch.set(ref, payload, merge=True)
+    batch.commit()
 
     api_list_stat_templates_cached.clear()
     return {"ok": True}
@@ -11974,15 +12000,28 @@ div[data-testid="stElementContainer"]:has(input[id*="stat_cellpick_"]) {
 
         tpl_items = api_list_stat_templates_cached().get("templates", [])
         tpl_pick_labels = ["(새로 추가)"] + [f"{t.get('order', 999999)} | {t.get('label','')}" for t in tpl_items]
+        tpl_by_pick = {f"{t.get('order', 999999)} | {t.get('label','')}": t for t in tpl_items}
+
+        if st.session_state.get("stat_tpl_reset_req", False):
+            st.session_state["stat_tpl_pick"] = "(새로 추가)"
+            st.session_state["stat_tpl_pick_prev"] = "(새로 추가)"
+            st.session_state["stat_tpl_label"] = ""
+            st.session_state["stat_tpl_order"] = 1
+            st.session_state["stat_tpl_reset_req"] = False
+            
         tpl_picked = st.selectbox("편집 대상", tpl_pick_labels, key="stat_tpl_pick")
 
-        edit_tpl = None
-        if tpl_picked != "(새로 추가)":
-            for t in tpl_items:
-                lab = f"{t.get('order', 999999)} | {t.get('label','')}"
-                if lab == tpl_picked:
-                    edit_tpl = t
-                    break
+        edit_tpl = tpl_by_pick.get(tpl_picked) if tpl_picked != "(새로 추가)" else None
+
+        prev_pick_key = "stat_tpl_pick_prev"
+        if st.session_state.get(prev_pick_key) != tpl_picked:
+            if edit_tpl:
+                st.session_state["stat_tpl_label"] = str(edit_tpl.get("label", ""))
+                st.session_state["stat_tpl_order"] = int(edit_tpl.get("order", 1) or 1)
+            else:
+                st.session_state["stat_tpl_label"] = ""
+                st.session_state["stat_tpl_order"] = 1
+            st.session_state[prev_pick_key] = tpl_picked
 
         t1, t2 = st.columns([3.0, 1.0])
         with t1:
@@ -12002,6 +12041,7 @@ div[data-testid="stElementContainer"]:has(input[id*="stat_cellpick_"]) {
                 if resu.get("ok"):
                     toast("템플릿 저장 완료!", icon="✅")
                     st.session_state["stat_loaded_sig"] = ""
+                    st.session_state["stat_tpl_reset_req"] = True
                     st.rerun()
                 else:
                     st.error(resu.get("error", "저장 실패"))
@@ -12010,6 +12050,7 @@ div[data-testid="stElementContainer"]:has(input[id*="stat_cellpick_"]) {
             if st.button("🧹 입력 초기화", use_container_width=True, key="stat_tpl_clear_btn"):
                 st.session_state.pop("stat_tpl_label", None)
                 st.session_state.pop("stat_tpl_order", None)
+                st.session_state.pop("stat_tpl_pick_prev", None)
                 st.session_state["stat_tpl_pick"] = "(새로 추가)"
                 st.rerun()
 
@@ -12021,6 +12062,7 @@ div[data-testid="stElementContainer"]:has(input[id*="stat_cellpick_"]) {
                 if resd2.get("ok"):
                     toast("템플릿 삭제 완료!", icon="🗑️")
                     st.session_state["stat_loaded_sig"] = ""
+                    st.session_state["stat_tpl_reset_req"] = True
                     st.rerun()
                 else:
                     st.error(resd2.get("error", "삭제 실패"))
