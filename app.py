@@ -10526,7 +10526,7 @@ if "💼 직업/월급" in tabs:
                         "order": int(x.get("order", 999999) or 999999),
                         "job": str(x.get("job", "") or ""),
                         "salary": int(x.get("salary", 0) or 0),
-                        "student_count": int(x.get("student_count", 1) or 1),
+                        "student_count": int(x.get("student_count", x.get("student_cnt", 1)) or 1),
                         "assigned_ids": list(x.get("assigned_ids", []) or []),
                     }
                 )
@@ -11237,8 +11237,8 @@ if "💼 직업/월급" in tabs:
                                 "order": int(r["순"]),
                                 "job": str(r["직업"]),
                                 "salary": int(r["월급"]),
-                                "student_cnt": int(r["학생 수"]),
-                                "assigned_ids": [],
+                                "student_count": int(r["학생 수"]),
+                                "assigned_ids": [""] * int(r["학생 수"]),
                                 "created_at": firestore.SERVER_TIMESTAMP,
                             }
                         )
