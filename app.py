@@ -5614,7 +5614,8 @@ ALL_TABS = [
     "💳 신용등급",
     "🏦 은행(적금)",
     "📈 투자",
-    "👥 계정 정보/활성화",
+    "🪪 권한부여",
+    "👥 계정 정보",
     "🏷️ 경매",
     "🍀 복권",
 ]
@@ -5646,8 +5647,8 @@ def tab_visible(tab_name: str):
     if tab_name == "🗓️ 일정":
         return can(my_perms, "schedule_write") or can(my_perms, "schedule_read")
 
-    # 계정 정보/활성화는 학생에게 기본 숨김(권한 관리 UI가 있어서)
-    if tab_name == "👥 계정 정보/활성화":
+    # 권한/계정 관리 탭은 학생에게 기본 숨김(권한 부여 시에만 노출)
+    if tab_name in ("🪪 권한부여", "👥 계정 정보"):
         return False
 
     return False
@@ -5712,15 +5713,19 @@ else:
     if inv_ok and has_admin_feature_access(my_perms, "📈 투자", is_admin=False):
         _append_extra_tab("📈 투자(관리자)", "admin::📈 투자")
 
-    # 2) 관리자 전용 탭(계정 정보/활성화 제외) — tab_visible() = tab::<탭이름> 권한 기반
+    # 2) 관리자 전용 탭(계정 정보 제외) — tab_visible() = tab::<탭이름> 권한 기반
     for t in ALL_TABS:
-        if t in ("👥 계정 정보/활성화",):
+        if t in ("🪪 권한부여", "👥 계정 정보"):
             continue
         # 이미 기본 탭(거래/적금/투자)으로 구현된 것들은 제외
         if t in ("🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권"):
             continue
         if tab_visible(t):
             _append_extra_tab(t, t)  # (표시라벨, 내부키)
+
+    # 3) 🪪 권한부여 탭은 학생에게 부여 시 항상 마지막 탭에 배치
+    if tab_visible("🪪 권한부여"):
+        _append_extra_tab("🪪 권한부여", "🪪 권한부여")
             
     user_tab_labels = base_labels + [lab for (lab, _k) in extra_admin_tabs]
 
@@ -8867,7 +8872,7 @@ def _render_invest_admin_like(*, inv_admin_ok_flag: bool, force_is_admin: bool, 
                     st.error(f"삭제 실패: {e}")
     
     # =========================
-    # 👥 계정 정보/활성화 (관리자 전용)
+    # 🪪 권한부여 + 👥 계정 정보 탭
     # =========================
 
 # =========================
@@ -9527,11 +9532,11 @@ if "📈 투자" in tabs:
             login_name=login_name,
             login_pin=login_pin,
         )
-if "👥 계정 정보/활성화" in tabs:
-    with tab_map["👥 계정 정보/활성화"]:
+if "🪪 권한부여" in tabs:
+    with tab_map["🪪 권한부여"]:
 
-        if not is_admin:
-            st.error("관리자 전용 탭입니다.")
+        if not (is_admin or has_tab_access(my_perms, "🪪 권한부여", is_admin=False)):
+            st.error("권한이 없는 사용자입니다.")
             st.stop()
 
         # -------------------------------------------------
@@ -9544,8 +9549,8 @@ if "👥 계정 정보/활성화" in tabs:
         #    - 📈 투자(관리자)            -> admin::📈 투자
         # -------------------------------------------------
         st.markdown("### 🔐 학생별 관리자 탭 권한 부여/회수")
-        st.caption("특정 학생에게 '관리자 탭' 또는 '관리자 기능(같은 탭 안)' 권한을 부여합니다. (👥 계정 정보/활성화 탭은 제외)")
-
+        st.caption("특정 학생에게 '관리자 탭' 또는 '관리자 기능(같은 탭 안)' 권한을 부여합니다. (👥 계정 정보 탭은 관리자 전용)")
+        
         # ✅ 부여 가능한 항목(탭/관리자기능)
         # - (관리자기능) 항목은 학생에게 기본으로 보이는 탭 안에서 관리자 UI를 열어주는 용도입니다.
         GRANT_OPTIONS = [
@@ -9555,7 +9560,7 @@ if "👥 계정 정보/활성화" in tabs:
         ] + [
             (t, ("tab", t))
             for t in ALL_TABS
-            if t not in ("👥 계정 정보/활성화", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권")
+            if t not in ("👥 계정 정보", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권")
         ]
 
         # ✅ 탭별로 함께 부여할 기능 권한(조작 가능하게)
@@ -9762,7 +9767,7 @@ if "👥 계정 정보/활성화" in tabs:
 
         allowed_tab_options = [
             t for t in ALL_TABS
-            if t not in ("👥 계정 정보/활성화", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권")
+            if t not in ("👥 계정 정보", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권")
         ]
         admin_option_labels = ["💰입금/출금(관리자)", "🏦 은행(적금)(관리자)", "📈 투자(관리자)"]
 
@@ -9914,7 +9919,14 @@ if "👥 계정 정보/활성화" in tabs:
                         st.warning("일부 행은 제외되었습니다: " + " / ".join(skipped[:4]))
                     st.rerun()
                 except Exception as e:
-                    st.error(f"엑셀 처리 중 오류: {e}")        
+                    st.error(f"엑셀 처리 중 오류: {e}")  
+
+if "👥 계정 정보" in tabs:
+    with tab_map["👥 계정 정보"]:
+
+        if not is_admin:
+            st.error("관리자 전용 탭입니다.")
+            st.stop()
 
         # -------------------------------------------------
         # ✅ (탭 상단) 엑셀 일괄 계정 추가 + 샘플 다운로드
