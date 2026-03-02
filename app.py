@@ -5052,6 +5052,358 @@ def api_list_lottery_admin_ledger(limit=200):
         )
     return {"ok": True, "rows": rows}
 
+
+# =========================
+# 🛒 Mart helpers
+# =========================
+def _mart_week_window(now_kst: datetime | None = None):
+    now = now_kst or datetime.now(KST)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=KST)
+    else:
+        now = now.astimezone(KST)
+
+    monday6 = datetime(now.year, now.month, now.day, 6, 0, 0, tzinfo=KST) - timedelta(days=now.weekday())
+    if now < monday6:
+        monday6 -= timedelta(days=7)
+    return monday6, monday6 + timedelta(days=7)
+
+
+def _mart_week_key(now_kst: datetime | None = None) -> str:
+    ws, _ = _mart_week_window(now_kst)
+    return ws.strftime("%Y-%m-%d_06")
+
+
+def _mart_block_message(msg: str):
+    st.markdown(
+        (
+            "<div style='background:#fdecec;border:1px solid #f3b8bf;color:#a33;"
+            "padding:12px;border-radius:6px;font-weight:600;'>"
+            f"{msg}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def api_get_mart_config():
+    try:
+        snap = db.collection("configs").document("mart").get()
+        d = (snap.to_dict() or {}) if snap.exists else {}
+        return {"ok": True, "weekly_limit": int(d.get("weekly_limit", 0) or 0)}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "weekly_limit": 0}
+
+
+def api_set_mart_weekly_limit(admin_pin: str, weekly_limit: int):
+    if not is_admin_pin(admin_pin):
+        return {"ok": False, "error": "관리자 PIN이 틀립니다."}
+    try:
+        db.collection("configs").document("mart").set(
+            {"weekly_limit": int(weekly_limit or 0), "updated_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        )
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def api_list_mart_templates():
+    rows = []
+    try:
+        q = db.collection("mart_templates").order_by("order").stream()
+    except Exception:
+        q = db.collection("mart_templates").stream()
+    for d in q:
+        x = d.to_dict() or {}
+        rows.append(
+            {
+                "template_id": d.id,
+                "item": str(x.get("item", "") or "").strip(),
+                "price": int(x.get("price", 0) or 0),
+                "order": int(x.get("order", 999999) or 999999),
+            }
+        )
+    rows = [r for r in rows if r["item"]]
+    rows.sort(key=lambda r: (int(r.get("order", 999999)), str(r.get("item", ""))))
+    return {"ok": True, "rows": rows}
+
+
+def _normalize_mart_template_orders(preferred_template_id: str = "", preferred_order: int | None = None):
+    preferred_template_id = str(preferred_template_id or "").strip()
+    preferred_order = int(preferred_order) if preferred_order is not None else None
+
+    raw = []
+    for d in db.collection("mart_templates").stream():
+        x = d.to_dict() or {}
+        item = str(x.get("item", "") or "").strip()
+        if not item:
+            continue
+        raw.append(
+            {
+                "template_id": d.id,
+                "item": item,
+                "order": int(x.get("order", 999999) or 999999),
+            }
+        )
+
+    if not raw:
+        return
+
+    raw.sort(key=lambda r: (int(r.get("order", 999999)), str(r.get("item", "")), str(r.get("template_id", ""))))
+
+    if preferred_template_id and preferred_template_id in {r["template_id"] for r in raw}:
+        target = next(r for r in raw if r["template_id"] == preferred_template_id)
+        rest = [r for r in raw if r["template_id"] != preferred_template_id]
+        pos = preferred_order if preferred_order is not None else int(target.get("order", 999999) or 999999)
+        pos = max(1, min(int(pos), len(raw)))
+        rows = rest[: pos - 1] + [target] + rest[pos - 1 :]
+    else:
+        rows = raw
+
+    batch = db.batch()
+    dirty = False
+    for i, r in enumerate(rows, start=1):
+        if int(r.get("order", 999999) or 999999) != i:
+            batch.set(
+                db.collection("mart_templates").document(str(r["template_id"])),
+                {"order": i, "updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            dirty = True
+    if dirty:
+        batch.commit()
+
+
+def api_upsert_mart_template(
+    admin_pin: str,
+    item: str,
+    price: int,
+    order: int = 999999,
+    template_id: str = "",
+    normalize_order: bool = True,
+):
+    if not is_admin_pin(admin_pin):
+        return {"ok": False, "error": "관리자 PIN이 틀립니다."}
+    item = str(item or "").strip()
+    if not item:
+        return {"ok": False, "error": "내역을 입력해 주세요."}
+    try:
+        ref = db.collection("mart_templates").document(str(template_id)) if template_id else db.collection("mart_templates").document()
+        ref.set(
+            {
+                "item": item,
+                "price": int(price or 0),
+                "order": max(1, int(order or 1)),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "created_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        if normalize_order:
+            _normalize_mart_template_orders(preferred_template_id=ref.id, preferred_order=max(1, int(order or 1)))        
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def api_delete_mart_template(admin_pin: str, template_id: str):
+    if not is_admin_pin(admin_pin):
+        return {"ok": False, "error": "관리자 PIN이 틀립니다."}
+    try:
+        db.collection("mart_templates").document(str(template_id)).delete()
+        _normalize_mart_template_orders()        
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def api_count_mart_used_this_week(student_id: str, include_pending: bool = True):
+    student_id = str(student_id or "").strip()
+    if not student_id:
+        return 0
+    wk = _mart_week_key()
+    statuses = ["approved", "pending"] if include_pending else ["approved"]
+    cnt = 0
+    for stx in statuses:
+        q = (
+            db.collection("mart_requests")
+            .where(filter=FieldFilter("student_id", "==", student_id))
+            .where(filter=FieldFilter("week_key", "==", wk))
+            .where(filter=FieldFilter("status", "==", stx))
+            .stream()
+        )
+        cnt += len(list(q))
+    return int(cnt)
+
+
+def api_create_mart_request(name: str, pin: str, item: str, price: int):
+    student_doc = fs_auth_student(name, pin)
+    if not student_doc:
+        return {"ok": False, "error": "이름 또는 비밀번호가 틀립니다."}
+
+    cfg = api_get_mart_config()
+    weekly_limit = int(cfg.get("weekly_limit", 0) or 0)
+    if weekly_limit <= 0:
+        return {"ok": False, "error": "이번주는 마트 구입이 불가능합니다"}
+
+    used = api_count_mart_used_this_week(student_doc.id, include_pending=True)
+    if used >= weekly_limit:
+        return {"ok": False, "error": "이번 주 간식은 구매 가능 횟수만큼 모두 구입하셨습니다."}
+
+    item = str(item or "").strip()
+    if not item:
+        return {"ok": False, "error": "내역을 입력해 주세요."}
+
+    price = int(price or 0)
+    if price <= 0:
+        return {"ok": False, "error": "금액은 1 이상이어야 합니다."}
+
+    try:
+        s = student_doc.to_dict() or {}
+        db.collection("mart_requests").document().set(
+            {
+                "student_id": student_doc.id,
+                "student_no": int(s.get("no", 0) or 0),
+                "student_name": str(s.get("name", "") or ""),
+                "item": item,
+                "price": int(price),
+                "status": "pending",
+                "week_key": _mart_week_key(),
+                "created_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def api_list_mart_requests(status: str = "pending", limit: int = 300):
+    try:
+        q = (
+            db.collection("mart_requests")
+            .where(filter=FieldFilter("status", "==", str(status)))
+            .order_by("created_at", direction=firestore.Query.ASCENDING)
+            .limit(int(limit))
+            .stream()
+        )
+        docs = list(q)
+    except FailedPrecondition:
+        # 신규/변경 배포 환경에서 복합 인덱스가 준비되지 않은 경우를 대비
+        fallback_q = (
+            db.collection("mart_requests")
+            .where(filter=FieldFilter("status", "==", str(status)))
+            .stream()
+        )
+        docs = list(fallback_q)
+        
+    rows = []
+    for d in docs:
+        x = d.to_dict() or {}
+        created_dt_utc = _to_utc_datetime(x.get("created_at"))
+        rows.append(
+            {
+                "request_id": d.id,
+                "student_id": str(x.get("student_id", "") or ""),
+                "student_no": int(x.get("student_no", 0) or 0),
+                "student_name": str(x.get("student_name", "") or ""),
+                "item": str(x.get("item", "") or ""),
+                "price": int(x.get("price", 0) or 0),
+                "created_at": created_dt_utc,
+                "created_at_kr": format_kr_datetime(created_dt_utc.astimezone(KST)) if created_dt_utc else "",
+            }
+        )
+    rows.sort(key=lambda x: x.get("created_at") or datetime.min.replace(tzinfo=timezone.utc))
+    rows = rows[: int(limit)]
+    return {"ok": True, "rows": rows}
+
+
+def api_admin_approve_mart_request(admin_pin: str, request_id: str):
+    if not is_admin_pin(admin_pin):
+        return {"ok": False, "error": "관리자 PIN이 틀립니다."}
+    try:
+        ref = db.collection("mart_requests").document(str(request_id))
+        snap = ref.get()
+        if not snap.exists:
+            return {"ok": False, "error": "요청을 찾을 수 없습니다."}
+        req = snap.to_dict() or {}
+        if str(req.get("status", "")) != "pending":
+            return {"ok": False, "error": "이미 처리된 요청입니다."}
+
+        sid = str(req.get("student_id", "") or "")
+        name = str(req.get("student_name", "") or "")
+        item = str(req.get("item", "") or "")
+        price = int(req.get("price", 0) or 0)
+        if (not sid) or price <= 0:
+            return {"ok": False, "error": "요청 데이터가 올바르지 않습니다."}
+
+        approver_label = _get_recorder_label(True, str(globals().get("login_name", "") or "").strip())        
+
+        pay_res = api_admin_add_tx_by_student_id_with_treasury(
+            ADMIN_PIN,
+            sid,
+            memo=f"마트 구입({item})",
+            deposit=0,
+            withdraw=int(price),
+            apply_treasury=True,
+            treasury_memo=f"마트 구입 세입 {name} {item}".strip(),
+            actor="mart",
+            recorder_override=approver_label,
+        )
+        if not pay_res.get("ok"):
+            return {"ok": False, "error": pay_res.get("error", "결제 실패")}
+
+        ref.set(
+            {"status": "approved", "approved_at": firestore.SERVER_TIMESTAMP, "approved_by": approver_label},
+            merge=True,
+        )
+        db.collection("mart_ledger").document().set(
+            {
+                "request_id": str(request_id),
+                "student_id": sid,
+                "student_no": int(req.get("student_no", 0) or 0),
+                "student_name": name,
+                "item": item,
+                "price": int(price),
+                "approved_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def api_admin_reject_mart_request(admin_pin: str, request_id: str):
+    if not is_admin_pin(admin_pin):
+        return {"ok": False, "error": "관리자 PIN이 틀립니다."}
+    try:
+        db.collection("mart_requests").document(str(request_id)).set(
+            {"status": "rejected", "rejected_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        )
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def api_list_mart_ledger(limit: int = 300):
+    q = db.collection("mart_ledger").order_by("approved_at", direction=firestore.Query.DESCENDING).limit(int(limit)).stream()
+    rows = []
+    for d in q:
+        x = d.to_dict() or {}
+        rows.append(
+            {
+                "구입일시": format_kr_datetime(x.get("approved_at")),
+                "번호": int(x.get("student_no", 0) or 0),
+                "이름": str(x.get("student_name", "") or ""),
+                "구입내역": str(x.get("item", "") or ""),
+                "구입가격": int(x.get("price", 0) or 0),
+            }
+        )
+    return {"ok": True, "rows": rows}
+
 # =========================
 # 학급 확장: Roles/Permissions
 # =========================
@@ -5614,8 +5966,9 @@ ALL_TABS = [
     "💳 신용등급",
     "🏦 은행(적금)",
     "📈 투자",
-    "🪪 권한부여",
+    "⭐ 권한부여",
     "👥 계정 정보",
+    "🛒마트",    
     "🏷️ 경매",
     "🍀 복권",
 ]
@@ -5626,7 +5979,7 @@ def tab_visible(tab_name: str):
         return True
 
     # 학생 기본 탭(항상 표시)
-    if tab_name in ("🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권"):
+    if tab_name in ("🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🛒마트", "🏷️ 경매", "🍀 복권"):
         return True
 
     # ✅ 학생에게 '탭 권한(tab::<탭이름>)'이 부여된 경우 표시
@@ -5648,7 +6001,7 @@ def tab_visible(tab_name: str):
         return can(my_perms, "schedule_write") or can(my_perms, "schedule_read")
 
     # 권한/계정 관리 탭은 학생에게 기본 숨김(권한 부여 시에만 노출)
-    if tab_name in ("🪪 권한부여", "👥 계정 정보"):
+    if tab_name in ("⭐ 권한부여", "👥 계정 정보"):
         return False
 
     return False
@@ -5684,6 +6037,7 @@ else:
     if inv_ok:
         base_labels.append("📈 투자")
     base_labels.append("🎯 목표")
+    base_labels.append("🛒마트")    
     base_labels.append("🏷️ 경매")
     base_labels.append("🍀 복권")
 
@@ -5713,20 +6067,32 @@ else:
     if inv_ok and has_admin_feature_access(my_perms, "📈 투자", is_admin=False):
         _append_extra_tab("📈 투자(관리자)", "admin::📈 투자")
 
+    if has_admin_feature_access(my_perms, "🛒마트", is_admin=False):
+        _append_extra_tab("🛒마트(관리자)", "admin::🛒마트")    
+
     # 2) 관리자 전용 탭(계정 정보 제외) — tab_visible() = tab::<탭이름> 권한 기반
     for t in ALL_TABS:
-        if t in ("🪪 권한부여", "👥 계정 정보"):
+        if t in ("⭐ 권한부여", "👥 계정 정보"):
             continue
         # 이미 기본 탭(거래/적금/투자)으로 구현된 것들은 제외
-        if t in ("🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권"):
+        if t in ("🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🛒마트", "🏷️ 경매", "🍀 복권"):
             continue
         if tab_visible(t):
             _append_extra_tab(t, t)  # (표시라벨, 내부키)
 
-    # 3) 🪪 권한부여 탭은 학생에게 부여 시 항상 마지막 탭에 배치
-    if tab_visible("🪪 권한부여"):
-        _append_extra_tab("🪪 권한부여", "🪪 권한부여")
-            
+    # 3) ⭐ 권한부여 탭은 학생에게 부여 시 항상 마지막 탭에 배치
+    if tab_visible("⭐ 권한부여"):
+        _append_extra_tab("⭐ 권한부여", "⭐ 권한부여")
+
+    # 4) 🛒마트(관리자)는 항상 최종 탭으로 이동
+    mart_admin_entry = None
+    for i, (lab, key_internal) in enumerate(extra_admin_tabs):
+        if key_internal == "admin::🛒마트":
+            mart_admin_entry = extra_admin_tabs.pop(i)
+            break
+    if mart_admin_entry is not None:
+        extra_admin_tabs.append(mart_admin_entry)
+    
     user_tab_labels = base_labels + [lab for (lab, _k) in extra_admin_tabs]
 
     # ✅ (PATCH) 사용자 모드: 탭 위에 통장/정보 요약 표시
@@ -5750,6 +6116,8 @@ else:
         idx += 1
     tab_map["🎯 목표"] = tab_objs[idx]
     idx += 1
+    tab_map["🛒마트"] = tab_objs[idx]
+    idx += 1    
     tab_map["🏷️ 경매"] = tab_objs[idx]
     idx += 1
     tab_map["🍀 복권"] = tab_objs[idx]
@@ -8872,7 +9240,7 @@ def _render_invest_admin_like(*, inv_admin_ok_flag: bool, force_is_admin: bool, 
                     st.error(f"삭제 실패: {e}")
     
     # =========================
-    # 🪪 권한부여 + 👥 계정 정보 탭
+    # ⭐ 권한부여 + 👥 계정 정보 탭
     # =========================
 
 # =========================
@@ -9532,10 +9900,10 @@ if "📈 투자" in tabs:
             login_name=login_name,
             login_pin=login_pin,
         )
-if "🪪 권한부여" in tabs:
-    with tab_map["🪪 권한부여"]:
+if "⭐ 권한부여" in tabs:
+    with tab_map["⭐ 권한부여"]:
 
-        if not (is_admin or has_tab_access(my_perms, "🪪 권한부여", is_admin=False)):
+        if not (is_admin or has_tab_access(my_perms, "⭐ 권한부여", is_admin=False)):
             st.error("권한이 없는 사용자입니다.")
             st.stop()
 
@@ -9557,10 +9925,11 @@ if "🪪 권한부여" in tabs:
             ("💰입금/출금(관리자)", ("admin", "🏦 내 통장")),
             ("🏦 은행(적금)(관리자)", ("admin", "🏦 은행(적금)")),
             ("📈 투자(관리자)", ("admin", "📈 투자")),
+            ("🛒마트(관리자)", ("admin", "🛒마트")),            
         ] + [
             (t, ("tab", t))
             for t in ALL_TABS
-            if t not in ("👥 계정 정보", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권")
+            if t not in ("👥 계정 정보", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🛒마트", "🏷️ 경매", "🍀 복권")
         ]
 
         # ✅ 탭별로 함께 부여할 기능 권한(조작 가능하게)
@@ -9733,6 +10102,8 @@ if "🪪 권한부여" in tabs:
                     admin_disp.append("🏦 은행(적금)(관리자)")
                 elif t == "📈 투자":
                     admin_disp.append("📈 투자(관리자)")
+                elif t == "🛒마트":
+                    admin_disp.append("🛒마트(관리자)")                    
                 else:
                     admin_disp.append(f"{t}(관리자)")
 
@@ -9767,10 +10138,10 @@ if "🪪 권한부여" in tabs:
 
         allowed_tab_options = [
             t for t in ALL_TABS
-            if t not in ("👥 계정 정보", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권")
+            if t not in ("👥 계정 정보", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🛒마트", "🏷️ 경매", "🍀 복권")
         ]
-        admin_option_labels = ["💰입금/출금(관리자)", "🏦 은행(적금)(관리자)", "📈 투자(관리자)"]
-
+        admin_option_labels = ["💰입금/출금(관리자)", "🏦 은행(적금)(관리자)", "📈 투자(관리자)", "🛒마트(관리자)"]
+        
         # 계정/비번관리(활성 학생) 목록이 있으면 번호/이름을 샘플 엑셀에 그대로 반영
         sample_student_rows = []
         for r in _list_active_students_full_cached():
@@ -9850,6 +10221,8 @@ if "🪪 권한부여" in tabs:
             _norm_label("은행(적금)(관리자)"): "🏦 은행(적금)",
             _norm_label("📈 투자(관리자)"): "📈 투자",
             _norm_label("투자(관리자)"): "📈 투자",
+            _norm_label("🛒마트(관리자)"): "🛒마트",
+            _norm_label("마트(관리자)"): "🛒마트",            
         }
 
         if st.button("엑셀 일괄 등록 실행", use_container_width=True, key="perm_bulk_run"):
@@ -13201,6 +13574,225 @@ div[data-testid="stDataFrame"] * { font-size: 0.80rem !important; }
             df_rate = pd.DataFrame(table_rows)
             st.dataframe(df_rate, use_container_width=True, hide_index=True)
 
+
+# =========================
+# 🛒 마트 탭
+# =========================
+def _render_mart_user_ui(login_name: str, login_pin: str, my_student_id: str):
+    cfg = api_get_mart_config()
+    weekly_limit = int(cfg.get("weekly_limit", 0) or 0)
+
+    if weekly_limit <= 0:
+        _mart_block_message("이번주는 마트 구입이 불가능합니다")
+        return
+
+    used = api_count_mart_used_this_week(my_student_id, include_pending=True)
+    if used >= weekly_limit:
+        _mart_block_message("이번 주 간식은 구매 가능 횟수만큼 모두 구입하셨습니다.")
+        return
+
+    tpl_rows = api_list_mart_templates().get("rows", [])
+    if st.session_state.get("mart_user_reset_req", False):
+        st.session_state["mart_user_tpl_pick"] = "(직접입력)"
+        st.session_state["mart_user_tpl_pick_prev"] = "(직접입력)"
+        st.session_state["mart_user_item"] = ""
+        st.session_state["mart_user_price"] = 0
+        st.session_state["mart_user_reset_req"] = False    
+    st.markdown("#### 🛍️ 마트 장보기")
+    opts = ["(직접입력)"] + [f"{r['item']} | {int(r['price'])}드림" for r in tpl_rows]
+    pick = st.selectbox("내역 템플릿", opts, key="mart_user_tpl_pick")
+
+    prev_pick_key = "mart_user_tpl_pick_prev"
+    if st.session_state.get(prev_pick_key) != pick:
+        if pick != "(직접입력)":
+            idx = max(0, opts.index(pick) - 1)
+            sel = tpl_rows[idx]
+            st.session_state["mart_user_item"] = str(sel.get("item", "") or "")
+            st.session_state["mart_user_price"] = int(sel.get("price", 0) or 0)
+        else:
+            st.session_state["mart_user_item"] = ""
+            st.session_state["mart_user_price"] = 0
+        st.session_state[prev_pick_key] = pick
+
+    st.session_state.setdefault("mart_user_item", "")
+    st.session_state.setdefault("mart_user_price", 0)
+
+    item = st.text_input("내역", key="mart_user_item")
+    price = st.number_input("금액", min_value=0, step=1, key="mart_user_price")
+
+    if st.button("저장", use_container_width=True, key="mart_user_save"):
+        res = api_create_mart_request(login_name, login_pin, item=item, price=int(price))
+        if res.get("ok"):
+            toast("마트 구입 요청이 저장되었습니다.", icon="✅")
+            st.session_state["mart_user_reset_req"] = True
+            st.rerun()
+        else:
+            st.error(res.get("error", "저장 실패"))
+
+
+def _render_mart_admin_ui():
+    st.markdown("#### 🚦 구입 제한 설정")
+    cfg = api_get_mart_config()
+    cur = int(cfg.get("weekly_limit", 0) or 0)
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        new_limit = st.number_input("주간 구입 가능 개수", min_value=0, step=1, value=cur, key="mart_weekly_limit")
+    with c2:
+        st.write("")
+        if st.button("저장", key="mart_limit_save", use_container_width=True):
+            out = api_set_mart_weekly_limit(ADMIN_PIN, int(new_limit))
+            if out.get("ok"):
+                toast("주간 제한 저장 완료", icon="✅")
+                st.rerun()
+            else:
+                st.error(out.get("error", "저장 실패"))
+
+    st.markdown("#### ✅ 구입 승인")
+    pend = api_list_mart_requests(status="pending", limit=200).get("rows", [])
+    if not pend:
+        st.info("승인 대기 요청이 없습니다.")
+    for r in pend:
+        c = st.columns([3,1,1])
+        c[0].write(f"{r.get('created_at_kr','')} | {int(r.get('student_no',0)):02d}번 | {r.get('student_name','')} | {r.get('item','')} | {int(r.get('price',0))}드림")
+        if c[1].button("승인", key=f"mart_appr_{r['request_id']}", use_container_width=True):
+            out = api_admin_approve_mart_request(ADMIN_PIN, r["request_id"])
+            if out.get("ok"):
+                toast("승인 완료", icon="✅")
+                st.rerun()
+            else:
+                st.error(out.get("error", "승인 실패"))
+        if c[2].button("거절", key=f"mart_rej_{r['request_id']}", use_container_width=True):
+            out = api_admin_reject_mart_request(ADMIN_PIN, r["request_id"])
+            if out.get("ok"):
+                toast("거절 완료", icon="✅")
+                st.rerun()
+            else:
+                st.error(out.get("error", "거절 실패"))
+
+    st.markdown("#### 📒 마트 구입 장부")
+    led_rows = api_list_mart_ledger(limit=300).get("rows", [])
+    st.dataframe(pd.DataFrame(led_rows), use_container_width=True, hide_index=True)
+
+    trows = api_list_mart_templates().get("rows", [])    
+    st.markdown("#### 🧩 마트 템플릿 추가/수정/삭제")
+    pick_labels = ["(새로 추가)"] + [f"{int(t.get('order', 0))} | {t.get('item', '')} | {int(t.get('price', 0))}드림" for t in trows]
+    tpl_by_pick = {f"{int(t.get('order', 0))} | {t.get('item', '')} | {int(t.get('price', 0))}드림": t for t in trows}
+
+    if st.session_state.get("mart_tpl_reset_req", False):
+        st.session_state["mart_tpl_pick"] = "(새로 추가)"
+        st.session_state["mart_tpl_pick_prev"] = "(새로 추가)"
+        st.session_state["mart_tpl_item"] = ""
+        st.session_state["mart_tpl_price"] = 0
+        st.session_state["mart_tpl_order"] = max(1, len(trows) + 1)
+        st.session_state["mart_tpl_reset_req"] = False
+
+    picked = st.selectbox("편집 대상", pick_labels, key="mart_tpl_pick")
+    edit_tpl = tpl_by_pick.get(picked) if picked != "(새로 추가)" else None
+
+    if st.session_state.get("mart_tpl_pick_prev") != picked:
+        if edit_tpl:
+            st.session_state["mart_tpl_item"] = str(edit_tpl.get("item", "") or "")
+            st.session_state["mart_tpl_price"] = int(edit_tpl.get("price", 0) or 0)
+            st.session_state["mart_tpl_order"] = int(edit_tpl.get("order", 0) or 0)
+        else:
+            st.session_state["mart_tpl_item"] = ""
+            st.session_state["mart_tpl_price"] = 0
+            st.session_state["mart_tpl_order"] = max(1, len(trows) + 1)
+        st.session_state["mart_tpl_pick_prev"] = picked
+
+    t1, t2, t3 = st.columns([3, 2, 1])
+    with t1:
+        item = st.text_input("내역", key="mart_tpl_item").strip()
+    with t2:
+        price = st.number_input("금액", min_value=0, step=1, key="mart_tpl_price")
+    with t3:
+        order = st.number_input("순서", min_value=0, step=1, key="mart_tpl_order")
+
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("저장", key="mart_tpl_save", use_container_width=True):
+            out = api_upsert_mart_template(
+                ADMIN_PIN,
+                item=item,
+                price=int(price),
+                order=int(order),
+                template_id=(edit_tpl.get("template_id") if edit_tpl else ""),
+            )
+            if out.get("ok"):
+                toast("템플릿 저장 완료", icon="✅")
+                st.session_state["mart_tpl_reset_req"] = True
+                st.rerun()
+            else:
+                st.error(out.get("error", "저장 실패"))
+    with b2:
+        if st.button("삭제", key="mart_tpl_del", use_container_width=True, disabled=(edit_tpl is None)):
+            out = api_delete_mart_template(ADMIN_PIN, edit_tpl["template_id"])
+            if out.get("ok"):
+                toast("삭제 완료", icon="✅")
+                st.session_state["mart_tpl_reset_req"] = True
+                st.rerun()
+            else:
+                st.error(out.get("error", "삭제 실패"))
+    
+    st.markdown("#### 📥 마트 템플릿 엑셀로 일괄 추가")
+    sample = pd.DataFrame([{"내역":"초코파이","금액":60,"순서":1}])
+    bio = BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
+        sample.to_excel(writer, index=False, sheet_name="mart_templates")
+    st.download_button(
+        "마트 템플릿 샘플 엑셀 다운로드(형식: 내역 | 금액 | 순서)",
+        data=bio.getvalue(),
+        file_name="mart_template_sample.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="mart_tpl_sample_down",
+        use_container_width=True,
+    )
+
+    up = st.file_uploader("마트 템플릿 엑셀 업로드(.xlsx)", type=["xlsx"], key="mart_tpl_uploader")
+    overwrite = st.checkbox("저장 시 기존 마트 템플릿 리스트를 모두 삭제하고 새로 올린 엑셀로 덮어쓰기", key="mart_tpl_overwrite")
+    if st.button("저장(반영)", key="mart_tpl_excel_apply", use_container_width=True):
+        if not up:
+            st.warning("엑셀 파일을 업로드해 주세요.")
+        else:
+            try:
+                df = pd.read_excel(up)
+                need = {"내역", "금액", "순서"}
+                if not need.issubset(set(df.columns)):
+                    st.error("엑셀 컬럼이 부족합니다. 필요 컬럼: 내역, 금액, 순서")
+                else:
+                    if overwrite:
+                        for d in db.collection("mart_templates").stream():
+                            d.reference.delete()
+                    n = 0
+                    for _, row in df.iterrows():
+                        item = str(row.get("내역", "") or "").strip()
+                        if not item:
+                            continue
+                        api_upsert_mart_template(
+                            ADMIN_PIN,
+                            item=item,
+                            price=int(row.get("금액", 0) or 0),
+                            order=max(1, int(row.get("순서", 1) or 1)),
+                            normalize_order=False,
+                        )
+                        n += 1
+                    _normalize_mart_template_orders()
+                    toast(f"마트 템플릿 반영 완료: {n}건", icon="✅")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"엑셀 반영 실패: {e}")
+
+
+if "🛒마트" in tabs:
+    with tab_map["🛒마트"]:
+        if is_admin:
+            _render_mart_admin_ui()
+        else:
+            _render_mart_user_ui(login_name, login_pin, my_student_id)
+if "admin::🛒마트" in tabs:
+    with tab_map["admin::🛒마트"]:
+        _render_mart_admin_ui()
+        
 # =========================
 # 🏷️ 경매 탭
 # =========================
