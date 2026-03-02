@@ -11124,10 +11124,10 @@ if "💼 직업/월급" in tabs:
         # ✅ 샘플 엑셀 다운로드  (※ 실수령은 자동 계산이므로 컬럼에서 제거)
         sample_df = pd.DataFrame(
             [
-                {"순": 1, "직업": "은행원", "월급": 500, "학생 수": 1},
-                {"순": 2, "직업": "통계청", "월급": 300, "학생 수": 2},
+                {"순": 1, "직업": "은행원", "월급": 500, "배정 수": 1},
+                {"순": 2, "직업": "통계청", "월급": 300, "배정 수": 2},
             ],
-            columns=["순", "직업", "월급", "학생 수"],
+            columns=["순", "직업", "월급", "배정 수"],
         )
         bio = io.BytesIO()
         with pd.ExcelWriter(bio, engine="openpyxl") as writer:
@@ -11172,9 +11172,13 @@ if "💼 직업/월급" in tabs:
                     df = df.copy()
                     df.columns = [str(c).strip() for c in df.columns]
 
-                    need_cols = {"순", "직업", "월급", "학생 수"}
+                    # ✅ 신규 템플릿 컬럼명은 '배정수'를 사용 (기존 '학생 수'도 하위호환)
+                    if "배정수" not in df.columns and "학생 수" in df.columns:
+                        df = df.rename(columns={"학생 수": "배정수"})
+
+                    need_cols = {"순", "직업", "월급", "배정 수"}
                     if not need_cols.issubset(set(df.columns)):
-                        st.error("엑셀 컬럼은 반드시: 순 | 직업 | 월급 | 학생 수 여야 합니다.")
+                        st.error("엑셀 컬럼은 반드시: 순 | 직업 | 월급 | 배정 수 여야 합니다.")
                         st.session_state["job_bulk_df"] = None
                         st.session_state["job_bulk_sig"] = None
                     else:
@@ -11182,19 +11186,19 @@ if "💼 직업/월급" in tabs:
                         df["순"] = pd.to_numeric(df["순"], errors="coerce").fillna(999999).astype(int)
                         df["직업"] = df["직업"].astype(str).str.strip()
                         df["월급"] = pd.to_numeric(df["월급"], errors="coerce").fillna(0).astype(int)
-                        df["학생 수"] = pd.to_numeric(df["학생 수"], errors="coerce").fillna(0).astype(int)
-
+                        df["배정 수"] = pd.to_numeric(df["배정 수"], errors="coerce").fillna(0).astype(int)
+                        
                         bad_job = df[df["직업"].str.len() == 0]
                         bad_sal = df[df["월급"] <= 0]
-                        bad_cnt = df[df["학생 수"] <= 0]
-
+                        bad_cnt = df[df["배정 수"] <= 0]
+                        
                         if (not bad_job.empty) or (not bad_sal.empty) or (not bad_cnt.empty):
                             if not bad_job.empty:
                                 st.error("❌ 직업명이 비어있는 행이 있습니다.")
                             if not bad_sal.empty:
                                 st.error("❌ 월급은 1 이상이어야 합니다.")
                             if not bad_cnt.empty:
-                                st.error("❌ 학생 수는 1 이상이어야 합니다.")
+                                st.error("❌ 배정 수는 1 이상이어야 합니다.")
                             st.session_state["job_bulk_df"] = None
                             st.session_state["job_bulk_sig"] = None
                         else:
@@ -11237,8 +11241,8 @@ if "💼 직업/월급" in tabs:
                                 "order": int(r["순"]),
                                 "job": str(r["직업"]),
                                 "salary": int(r["월급"]),
-                                "student_count": int(r["학생 수"]),
-                                "assigned_ids": [""] * int(r["학생 수"]),
+                                "student_count": int(r["배정 수"]),
+                                "assigned_ids": [""] * int(r["배정 수"]),
                                 "created_at": firestore.SERVER_TIMESTAMP,
                             }
                         )
