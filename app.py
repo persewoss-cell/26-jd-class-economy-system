@@ -3346,6 +3346,20 @@ def render_treasury_trade_ui(prefix: str, templates_list: list, template_by_disp
     st.session_state.setdefault(tpl_key, "(직접 입력)")
     st.session_state.setdefault(tpl_prev_key, "(직접 입력)")
 
+    reset_flag_key = f"{prefix}_reset_request"
+    if st.session_state.get(reset_flag_key, False):
+        st.session_state[memo_key] = ""
+        st.session_state[inc_key] = 0
+        st.session_state[exp_key] = 0
+        st.session_state[tpl_key] = "(직접 입력)"
+        st.session_state[tpl_prev_key] = "(직접 입력)"
+        st.session_state[f"{prefix}_mode"] = "세입(+)"
+        st.session_state[f"{prefix}_pick"] = "0"
+        st.session_state[f"{prefix}_pick_prev"] = "0"
+        st.session_state[f"{prefix}_mode_prev"] = "세입(+)"
+        st.session_state[f"{prefix}_skip_once"] = False
+        st.session_state[reset_flag_key] = False    
+
     # 템플릿 선택
     tpl_labels = ["(직접 입력)"] + [treasury_template_display(t) for t in templates_list]
     sel = st.selectbox("국고 템플릿", tpl_labels, key=tpl_key)
@@ -5912,6 +5926,7 @@ if "🏦 내 통장" in tabs:
                                                 actor="전체",
                                                 recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                                             )
+                                    st.session_state["admin_bulk_reward_reset_request"] = True
                                     st.rerun()
                                 else:
                                     st.error(res.get("error", "일괄 지급 실패"))
@@ -5929,6 +5944,7 @@ if "🏦 내 통장" in tabs:
                                                 actor="전체",
                                                 recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                                             )
+                                    st.session_state["admin_bulk_reward_reset_request"] = True
                                     st.rerun()
                                 else:
                                     st.error(res.get("error", "일괄 출금 실패"))
@@ -6516,7 +6532,7 @@ if "🏦 내 통장" in tabs:
             # [개인] : 체크된 학생만 “일괄 입금/출금” 적용
             # =================================================
             with sub_tab_personal:
-                st.markdown("### 👥 대상 학생 선택 (체크한 학생만 적용)")
+                st.markdown("### 👥 대상 학생 선택")
                 accounts_now = api_list_accounts_cached().get("accounts", [])
                 import re
 
@@ -6536,6 +6552,13 @@ if "🏦 내 통장" in tabs:
                     return 9999               # 번호 없으면 맨 뒤
 
                 accounts_now = sorted(accounts_now, key=_num_key)
+
+                if st.session_state.get("admin_personal_reward_reset_request", False):
+                    for _acc in (accounts_now or []):
+                        _sid = str(_acc.get("student_id", "") or "")
+                        if _sid:
+                            st.session_state[f"admin_personal_pick_{_sid}"] = False
+                    st.session_state["admin_personal_reward_reset_request"] = False
 
                 if not accounts_now:
                     st.info("활성 계정이 없습니다.")
@@ -6628,6 +6651,7 @@ if "🏦 내 통장" in tabs:
                             if ok_cnt > 0:
                                 toast(f"개인 적용 완료! ({ok_cnt}명)", icon="✅")
                                 api_list_accounts_cached.clear()
+                                st.session_state["admin_personal_reward_reset_request"] = True                                
                                 st.rerun()
                             else:
                                 st.error("적용 실패: " + (fail[0] if fail else "알 수 없는 오류"))
@@ -6869,6 +6893,7 @@ if "admin::🏦 내 통장" in tabs:
                                                 actor="전체",
                                                 recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                                             )
+                                    st.session_state["admin_bulk_reward_reset_request"] = True
                                     st.rerun()
                                 else:
                                     st.error(res.get("error", "일괄 입금 실패"))
@@ -6886,6 +6911,7 @@ if "admin::🏦 내 통장" in tabs:
                                                 actor="전체",
                                                 recorder_override=_get_recorder_label(True, str(globals().get("login_name", "") or "").strip()),
                                             )
+                                    st.session_state["admin_bulk_reward_reset_request"] = True
                                     st.rerun()
                                 else:
                                     st.error(res.get("error", "일괄 출금 실패"))
@@ -7494,6 +7520,13 @@ if "admin::🏦 내 통장" in tabs:
 
                 accounts_now = sorted(accounts_now, key=_num_key)
 
+                if st.session_state.get("admin_personal_reward_reset_request", False):
+                    for _acc in (accounts_now or []):
+                        _sid = str(_acc.get("student_id", "") or "")
+                        if _sid:
+                            st.session_state[f"admin_personal_pick_{_sid}"] = False
+                    st.session_state["admin_personal_reward_reset_request"] = False
+
                 if not accounts_now:
                     st.info("활성 계정이 없습니다.")
                 else:
@@ -7585,6 +7618,7 @@ if "admin::🏦 내 통장" in tabs:
                             if ok_cnt > 0:
                                 toast(f"개인 적용 완료! ({ok_cnt}명)", icon="✅")
                                 api_list_accounts_cached.clear()
+                                st.session_state["admin_personal_reward_reset_request"] = True
                                 st.rerun()
                             else:
                                 st.error("적용 실패: " + (fail[0] if fail else "알 수 없는 오류"))
@@ -7872,6 +7906,12 @@ def _render_invest_admin_like(*, inv_admin_ok_flag: bool, force_is_admin: bool, 
             st.markdown(f"- **{nm}** (현재주가 **{cur:.1f}**)")
     
             if inv_admin_ok:
+                inv_reset_key = f"inv_reset_req_{p['product_id']}"
+                if st.session_state.get(inv_reset_key, False):
+                    st.session_state[f"inv_reason_{p['product_id']}"] = ""
+                    st.session_state[f"inv_price_{p['product_id']}"] = float(cur)
+                    st.session_state[inv_reset_key] = False
+                    
                 with st.expander(f"{nm} 주가 변동 반영", expanded=False):
                     c1, c2, c3 = st.columns([3.2, 2.2, 1.2], gap="small")
                     with c1:
@@ -7908,6 +7948,7 @@ def _render_invest_admin_like(*, inv_admin_ok_flag: bool, force_is_admin: bool, 
                                     merge=True,
                                 )
                                 toast("주가가 반영되었습니다.", icon="✅")
+                                st.session_state[inv_reset_key] = True
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"저장 실패: {e}")
@@ -9288,152 +9329,168 @@ if "🔎 개별조회" in tabs:
             st.error("접근 권한이 없습니다.")
             st.stop()
 
-        name_search2 = st.text_input(
-            "🔎 계정검색(이름 일부)",
-            key="admin_ind_view_search"
-        ).strip()
+        # =========================
+        # ✅ students에서 번호(no) 포함해서 다시 로드(번호순 정렬)
+        # =========================
+        docs = (
+            db.collection("students")
+            .where(filter=FieldFilter("is_active", "==", True))
+            .stream()
+        )
 
-        # =================================================
-        # (PATCH) 🔎 개별조회 지연 로딩 게이트
-        #  - 로그인 시 자동 로딩 ❌
-        #  - 버튼 클릭 시에만 무거운 데이터 로드 ⭕
-        # =================================================
-        if "admin_ind_view_loaded" not in st.session_state:
-            st.session_state["admin_ind_view_loaded"] = False
+        acc_rows = []
+        for d in docs:
+            x = d.to_dict() or {}
+            nm = str(x.get("name", "") or "").strip()
+            if not nm:
+                continue
+            try:
+                no = int(x.get("no", 999999) or 999999)
+            except Exception:
+                no = 999999
+        
+            acc_rows.append(
+                {
+                    "student_id": d.id,
+                    "no": no,
+                    "name": nm,
+                    "balance": int(x.get("balance", 0) or 0),
+                }
+            )
 
-        # ✅ (PATCH) 로그아웃 상태면 이전에 눌렀던 "불러오기" 상태를 무조건 초기화
-        if not st.session_state.get("logged_in", False):
-            st.session_state.pop("admin_ind_view_loaded", None)
+        acc_rows.sort(
+            key=lambda r: (
+                int(r.get("no", 999999) or 999999),
+                str(r.get("name", "")),
+            )
+        )
 
-        if not st.session_state["admin_ind_view_loaded"]:
-            st.info("개별조회 데이터는 필요할 때만 불러옵니다.")
-            if st.button(
-                "🔄 개별조회 데이터 불러오기",
-                key="admin_ind_view_load",
-                use_container_width=True
-            ):
-                st.session_state["admin_ind_view_loaded"] = True
-                st.rerun()
+        if not acc_rows:
+            st.info("표시할 계정이 없습니다.")
         else:
-            # =========================
-            # 🔽 개별조회 접기 버튼
-            # =========================
-            if st.button(
-                "🔽 개별조회 접기",
-                key="admin_ind_view_close",
-                use_container_width=True
-            ):
-                st.session_state["admin_ind_view_loaded"] = False
-                st.rerun()
+            st.markdown("### 👥 대상 학생 선택")
 
-            # =========================
-            # ✅ students에서 번호(no) 포함해서 다시 로드(번호순 정렬)
-            # =========================
-            docs = (
-                db.collection("students")
-                .where(filter=FieldFilter("is_active", "==", True))
-                .stream()
-            )
+            selected_ids = []
+            selected_names = []
 
-            acc_rows = []
-            for d in docs:
-                x = d.to_dict() or {}
-                nm = str(x.get("name", "") or "").strip()
-                if not nm:
-                    continue
-                if name_search2 and (name_search2 not in nm):
-                    continue
-                try:
-                    no = int(x.get("no", 999999) or 999999)
-                except Exception:
-                    no = 999999
+            for base in range(0, len(acc_rows), 5):
+                cols = st.columns(5)
+                chunk = acc_rows[base : base + 5]
 
-                acc_rows.append(
-                    {
-                        "student_id": d.id,
-                        "no": no,
-                        "name": nm,
-                        "balance": int(x.get("balance", 0) or 0),
-                    }
-                )
+                for j in range(5):
+                    with cols[j]:
+                        if j < len(chunk):
+                            a = chunk[j]
+                            sid = str(a.get("student_id", "") or "")
+                            nm = str(a.get("name", "") or "")
+                            no = int(a.get("no", 0) or 0)
+                            label = f"{no}번 {nm}" if no > 0 else nm
 
-            acc_rows.sort(
-                key=lambda r: (
-                    int(r.get("no", 999999) or 999999),
-                    str(r.get("name", "")),
-                )
-            )
-
-            if not acc_rows:
-                st.info("표시할 계정이 없습니다.")
-            else:
-                for r in acc_rows:
-                    sid = str(r["student_id"])
-                    nm = str(r["name"])
-                    no = int(r.get("no", 0) or 0)
-                    bal_now = int(r.get("balance", 0) or 0)
-
-                    # -------------------------
-                    # 적금
-                    # -------------------------
-                    sres = api_savings_list_by_student_id(sid)
-                    savings = sres.get("savings", []) if sres.get("ok") else []
-
-                    # ✅ 적금 탭과 동일한 기준: 만기/해지 제외 원금 합계
-                    sv_total = sum(
-                        int(s.get("principal", 0) or 0)
-                        for s in savings
-                        if str(s.get("status", "")).lower().strip()
-                        not in ("matured", "canceled", "cancelled")
-                    )
-
-                    # -------------------------
-                    # 투자 요약
-                    # -------------------------
-                    inv_text, inv_total = _get_invest_summary_by_student_id(sid)
-
-                    # -------------------------
-                    # 직업 / 신용
-                    # -------------------------
-                    role_name = _get_role_name_by_student_id(sid)
-                    credit_score, credit_grade = _safe_credit(sid)
-
-                    # -------------------------
-                    # 총자산
-                    # -------------------------
-                    asset_total = int(bal_now) + int(sv_total) + int(inv_total)
-
-                    collapsed = _fmt_admin_one_line(
-                        no=no,
-                        name=nm,
-                        asset_total=asset_total,
-                        bal_now=bal_now,
-                        sv_total=sv_total,
-                        inv_text=inv_text,
-                        inv_total=inv_total,
-                        role_name=role_name,
-                        credit_score=credit_score,
-                        credit_grade=credit_grade,
-                    )
-
-                    with st.expander(collapsed, expanded=False):
-                        # -------------------------
-                        # 통장내역(최신 120)
-                        # -------------------------
-                        st.markdown("### 📒 통장내역")
-                        txr = api_get_txs_by_student_id(sid, limit=120)
-                        if not txr.get("ok"):
-                            st.error(txr.get("error", "내역을 불러오지 못했어요."))
+                            ck = st.checkbox(label, key=f"admin_ind_view_pick_{sid}")
+                            if ck:
+                                selected_ids.append(sid)
+                                selected_names.append(label)
                         else:
-                            df_tx = pd.DataFrame(txr.get("rows", []))
-                            if df_tx.empty:
-                                st.info("거래 내역이 없어요.")
-                            else:
-                                df_tx = df_tx.sort_values(
-                                    "created_at_utc",
-                                    ascending=False
-                                )
-                                render_tx_table(df_tx)
+                            st.write("")
+
+            if selected_names:
+                st.caption("선택됨: " + " · ".join(selected_names))
+
+            col_pick, col_all, col_fold = st.columns(3)
+            with col_pick:
+                if st.button("체크학생 조회", key="admin_ind_view_checked_btn", use_container_width=True):
+                    st.session_state["admin_ind_view_mode"] = "checked"
+            with col_all:
+                if st.button("전체 조회", key="admin_ind_view_all_btn", use_container_width=True):
+                    st.session_state["admin_ind_view_mode"] = "all"
+            with col_fold:
+                if st.button("조회 접기", key="admin_ind_view_fold_btn", use_container_width=True):
+                    st.session_state["admin_ind_view_mode"] = "none"
+
+            view_mode = st.session_state.get("admin_ind_view_mode", "none")
+
+            if view_mode == "checked":
+                if not selected_ids:
+                    st.warning("체크된 학생이 없습니다. 먼저 학생을 선택해 주세요.")
+                    view_rows = []
+                else:
+                    selected_set = set(selected_ids)
+                    view_rows = [r for r in acc_rows if str(r.get("student_id", "")) in selected_set]
+            elif view_mode == "all":
+                view_rows = acc_rows
+            else:
+                view_rows = []
+
+            if not view_rows:
+                st.info("아래 조회 버튼을 눌러 학생 정보를 불러오세요.")
+
+            for r in view_rows:
+                sid = str(r["student_id"])
+                nm = str(r["name"])
+                no = int(r.get("no", 0) or 0)
+                bal_now = int(r.get("balance", 0) or 0)
+
+                # -------------------------
+                # 적금
+                # -------------------------
+                sres = api_savings_list_by_student_id(sid)
+                savings = sres.get("savings", []) if sres.get("ok") else []
+
+                # ✅ 적금 탭과 동일한 기준: 만기/해지 제외 원금 합계
+                sv_total = sum(
+                    int(s.get("principal", 0) or 0)
+                    for s in savings
+                    if str(s.get("status", "")).lower().strip()
+                    not in ("matured", "canceled", "cancelled")
+                )
+
+                # -------------------------
+                # 투자 요약
+                # -------------------------
+                inv_text, inv_total = _get_invest_summary_by_student_id(sid)
+
+                # -------------------------
+                # 직업 / 신용
+                # -------------------------
+                role_name = _get_role_name_by_student_id(sid)
+                credit_score, credit_grade = _safe_credit(sid)
+
+                # -------------------------
+                # 총자산
+                # -------------------------
+                asset_total = int(bal_now) + int(sv_total) + int(inv_total)
+
+                collapsed = _fmt_admin_one_line(
+                    no=no,
+                    name=nm,
+                    asset_total=asset_total,
+                    bal_now=bal_now,
+                    sv_total=sv_total,
+                    inv_text=inv_text,
+                    inv_total=inv_total,
+                    role_name=role_name,
+                    credit_score=credit_score,
+                    credit_grade=credit_grade,
+                )
+
+                with st.expander(collapsed, expanded=False):
+                    # -------------------------
+                    # 통장내역(최신 120)
+                    # -------------------------
+                    st.markdown("### 📒 통장내역")
+                    txr = api_get_txs_by_student_id(sid, limit=120)
+                    if not txr.get("ok"):
+                        st.error(txr.get("error", "내역을 불러오지 못했어요."))
+                    else:
+                        df_tx = pd.DataFrame(txr.get("rows", []))
+                        if df_tx.empty:
+                            st.info("거래 내역이 없어요.")
+                        else:
+                            df_tx = df_tx.sort_values(
+                                "created_at_utc",
+                                ascending=False
+                            )
+                            render_tx_table(df_tx)
 
 if "📈 투자" in tabs:
     with tab_map["📈 투자"]:
@@ -9472,7 +9529,7 @@ if "👥 계정 정보/활성화" in tabs:
         ] + [
             (t, ("tab", t))
             for t in ALL_TABS
-            if t not in ("👥 계정 정보/활성화", "🏦 내 통장", "🏦 은행(적금)", "📈 투자")
+            if t not in ("👥 계정 정보/활성화", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권")
         ]
 
         # ✅ 탭별로 함께 부여할 기능 권한(조작 가능하게)
@@ -9513,6 +9570,12 @@ if "👥 계정 정보/활성화" in tabs:
         by_label = {_stu_label(r): r for r in stu_list}
         opt_labels = [lab for (lab, _v) in GRANT_OPTIONS]
         opt_map = {lab: v for (lab, v) in GRANT_OPTIONS}
+
+        if st.session_state.get("perm_reset_req_v2", False):
+            st.session_state["perm_sel_opt_label_v2"] = opt_labels[0] if opt_labels else ""
+            st.session_state["perm_sel_students_v2"] = []
+            st.session_state["perm_confirm_revoke_all_v2"] = False
+            st.session_state["perm_reset_req_v2"] = False        
 
         cpa, cpb = st.columns([2, 3])
         with cpa:
@@ -9589,6 +9652,7 @@ if "👥 계정 정보/활성화" in tabs:
                 n += 1
             _list_active_students_full_cached.clear()
             st.success(f"권한 부여 완료: {n}명")
+            st.session_state["perm_reset_req_v2"] = True            
             st.rerun()
         elif btn_revoke:
             keys = _keys_for_selection(sel_kind, sel_tab_internal)
@@ -9601,6 +9665,7 @@ if "👥 계정 정보/활성화" in tabs:
                 n += 1
             _list_active_students_full_cached.clear()
             st.success(f"권한 회수 완료: {n}명")
+            st.session_state["perm_reset_req_v2"] = True           
             st.rerun()
 
         if btn_revoke_all and confirm_all:
@@ -9611,6 +9676,7 @@ if "👥 계정 정보/활성화" in tabs:
                 n += 1
             _list_active_students_full_cached.clear()
             st.success(f"전체 학생 권한 전체 회수 완료: {n}명")
+            st.session_state["perm_reset_req_v2"] = True            
             st.rerun()
 
         # -------------------------------------------------
@@ -9659,6 +9725,170 @@ if "👥 계정 정보/활성화" in tabs:
             df_status = df_status.sort_values(["번호","이름"]).reset_index(drop=True)
 
         st.dataframe(df_status, use_container_width=True, hide_index=True)
+
+        # -------------------------------------------------
+        # 📥 일괄 엑셀 권한 부여
+        # -------------------------------------------------
+        st.markdown("### 📥 일괄 엑셀 권한 부여")
+        st.caption("형식: 번호 | 이름 | 추가 탭(tab::) | 관리자 기능(admin::). 한 학생에게 여러 권한을 줄 때는 행을 여러 번 작성하세요.")
+
+        from openpyxl.worksheet.datavalidation import DataValidation
+
+        allowed_tab_options = [
+            t for t in ALL_TABS
+            if t not in ("👥 계정 정보/활성화", "🏦 내 통장", "🏦 은행(적금)", "📈 투자", "🏷️ 경매", "🍀 복권")
+        ]
+        admin_option_labels = ["💰입금/출금(관리자)", "🏦 은행(적금)(관리자)", "📈 투자(관리자)"]
+
+        # 계정/비번관리(활성 학생) 목록이 있으면 번호/이름을 샘플 엑셀에 그대로 반영
+        sample_student_rows = []
+        for r in _list_active_students_full_cached():
+            try:
+                no = int(r.get("no", 0) or 0)
+            except Exception:
+                no = 0
+            name = str(r.get("name", "") or "").strip()
+            if no > 0 and name:
+                sample_student_rows.append({
+                    "번호": no,
+                    "이름": name,
+                    "추가 탭(tab::)": "",
+                    "관리자 기능(admin::)": "",
+                })
+
+        if sample_student_rows:
+            sample_perm_df = pd.DataFrame(sample_student_rows).sort_values(["번호", "이름"]).reset_index(drop=True)
+        else:
+            sample_perm_df = pd.DataFrame(
+                [
+                    {"번호": 1, "이름": "홍길동1", "추가 탭(tab::)": "💼 직업/월급", "관리자 기능(admin::)": ""},
+                    {"번호": 1, "이름": "홍길동1", "추가 탭(tab::)": "🏛️ 국세청(국고)", "관리자 기능(admin::)": ""},
+                    {"번호": 2, "이름": "홍길동2", "추가 탭(tab::)": "", "관리자 기능(admin::)": "💰입금/출금(관리자)"},
+                ]
+            )
+
+        perm_bio = BytesIO()
+        with pd.ExcelWriter(perm_bio, engine="openpyxl") as writer:
+            sample_perm_df.to_excel(writer, index=False, sheet_name="permissions")
+            pd.DataFrame({"추가 탭(tab::)": allowed_tab_options}).to_excel(writer, index=False, sheet_name="추가탭_목록")
+            pd.DataFrame({"관리자 기능(admin::)": admin_option_labels}).to_excel(writer, index=False, sheet_name="관리자기능_목록")
+
+            wb = writer.book
+            ws = writer.sheets["permissions"]
+
+            dv_tab = DataValidation(type="list", formula1="='추가탭_목록'!$A$2:$A$200", allow_blank=True)
+            dv_admin = DataValidation(type="list", formula1="='관리자기능_목록'!$A$2:$A$200", allow_blank=True)
+            ws.add_data_validation(dv_tab)
+            ws.add_data_validation(dv_admin)
+            dv_tab.add("C2:C500")
+            dv_admin.add("D2:D500")
+
+            for s_name in ("추가탭_목록", "관리자기능_목록"):
+                wb[s_name].sheet_state = "hidden"
+
+        st.download_button(
+            "📄 샘플 엑셀 다운로드",
+            data=perm_bio.getvalue(),
+            file_name="permissions_bulk_sample.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="perm_bulk_sample_down",
+        )
+
+        perm_up = st.file_uploader("📤 권한 엑셀 업로드(xlsx)", type=["xlsx"], key="perm_bulk_upl")
+        overwrite_perm = st.checkbox("저장 시 기존 템플릿 리스트 삭제하고 새로 올린 엑셀로 덮어쓰기", key="perm_bulk_overwrite")
+
+        # 텍스트 정규화(이모지/공백 제거)
+        def _norm_label(v: str) -> str:
+            return "".join(ch for ch in str(v or "") if ch.isalnum() or ch in ("(", ")")).strip().lower()
+
+        tab_alias = {_norm_label(t): t for t in allowed_tab_options}
+        tab_alias.update({
+            _norm_label("개별조회"): "🔎 개별조회",
+            _norm_label("직업/월급"): "💼 직업/월급",
+            _norm_label("국세청(국고)"): "🏛️ 국세청(국고)",
+            _norm_label("통계청"): "📊 통계청",
+            _norm_label("신용등급"): "💳 신용등급",
+            _norm_label("일정"): "🗓️ 일정",
+        })
+
+        admin_alias = {
+            _norm_label("💰입금/출금(관리자)"): "🏦 내 통장",
+            _norm_label("입금/출금(관리자)"): "🏦 내 통장",
+            _norm_label("🏦 은행(적금)(관리자)"): "🏦 은행(적금)",
+            _norm_label("은행(적금)(관리자)"): "🏦 은행(적금)",
+            _norm_label("📈 투자(관리자)"): "📈 투자",
+            _norm_label("투자(관리자)"): "📈 투자",
+        }
+
+        if st.button("엑셀 일괄 등록 실행", use_container_width=True, key="perm_bulk_run"):
+            if not perm_up:
+                st.warning("엑셀 파일을 업로드하세요.")
+            else:
+                try:
+                    df_perm = pd.read_excel(perm_up)
+                    req_cols = {"번호", "이름", "추가 탭(tab::)", "관리자 기능(admin::)"}
+                    if not req_cols.issubset(set(df_perm.columns)):
+                        st.error("엑셀 컬럼이 부족합니다. 필요 컬럼: 번호, 이름, 추가 탭(tab::), 관리자 기능(admin::)")
+                        st.stop()
+
+                    active_rows = _list_active_students_full_cached()
+                    by_no_name = {
+                        (int(r.get("no", 0) or 0), str(r.get("name", "") or "").strip()): str(r.get("student_id", "") or "")
+                        for r in active_rows
+                    }
+
+                    if overwrite_perm:
+                        for r in active_rows:
+                            sid = str(r.get("student_id", "") or "")
+                            if sid:
+                                _update_student_extra(sid, clear_all=True)
+
+                    applied = 0
+                    skipped = []
+                    for _, rowx in df_perm.iterrows():
+                        try:
+                            no = int(rowx.get("번호"))
+                        except Exception:
+                            skipped.append("번호 누락/형식 오류")
+                            continue
+                        nm = str(rowx.get("이름", "") or "").strip()
+                        sid = by_no_name.get((no, nm))
+                        if not sid:
+                            skipped.append(f"대상 없음: {no} {nm}")
+                            continue
+
+                        tab_raw = str(rowx.get("추가 탭(tab::)", "") or "").strip()
+                        admin_raw = str(rowx.get("관리자 기능(admin::)", "") or "").strip()
+
+                        add_keys = []
+                        if tab_raw:
+                            tab_internal = tab_alias.get(_norm_label(tab_raw))
+                            if tab_internal:
+                                add_keys.extend(_keys_for_selection("tab", tab_internal))
+                            else:
+                                skipped.append(f"추가 탭 인식 실패: {tab_raw}")
+                        if admin_raw:
+                            admin_internal = admin_alias.get(_norm_label(admin_raw))
+                            if admin_internal:
+                                add_keys.extend(_keys_for_selection("admin", admin_internal))
+                            else:
+                                skipped.append(f"관리자 기능 인식 실패: {admin_raw}")
+
+                        if not add_keys:
+                            continue
+
+                        _update_student_extra(sid, add_keys=add_keys)
+                        applied += 1
+
+                    _list_active_students_full_cached.clear()
+                    if applied:
+                        st.success(f"엑셀 권한 부여 완료: {applied}행 적용")
+                    if skipped:
+                        st.warning("일부 행은 제외되었습니다: " + " / ".join(skipped[:4]))
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"엑셀 처리 중 오류: {e}")        
 
         # -------------------------------------------------
         # ✅ (탭 상단) 엑셀 일괄 계정 추가 + 샘플 다운로드
@@ -10325,8 +10555,22 @@ if "💼 직업/월급" in tabs:
         st.caption("직업을 선택한 뒤, 학생을 선택하고 ‘고용/해제’ 버튼을 누르세요.")
 
         # 직업 선택
-        job_pick_labels = [f"{r['order']} | {r['job']} (월급 {int(r['salary'])})" for r in rows]
+        job_pick_labels = []
+        for r in rows:
+            assigned_ids = list(r.get("assigned_ids", []) or [])
+            assigned_count = max(0, int(r.get("student_count", 1) or 1))
+            hired_count = sum(1 for sid in assigned_ids if str(sid).strip())
+            job_pick_labels.append(
+                f"{r['order']} | {r['job']} (월급 {int(r['salary'])}) | 배정수 {assigned_count} | 현재 고용수 {hired_count}"
+            )
         job_pick_map = {lab: r["_id"] for lab, r in zip(job_pick_labels, rows)}
+
+        if st.session_state.get("job_assign_reset_req2", False):
+            if job_pick_labels:
+                st.session_state["job_assign_pick2"] = job_pick_labels[0]
+            st.session_state["job_assign_students2"] = []
+            st.session_state["job_assign_clear_all_chk"] = False
+            st.session_state["job_assign_reset_req2"] = False        
 
         assign_c1, assign_c2 = st.columns([1.2, 2.0])
         with assign_c1:
@@ -10383,6 +10627,7 @@ if "💼 직업/월급" in tabs:
                             if changed:
                                 ref.update({"assigned_ids": assigned})
                                 toast("고용 완료!", icon="✅")
+                                st.session_state["job_assign_reset_req2"] = True
                                 if full > 0:
                                     st.warning(f"정원이 가득 차서 {full}명은 배정되지 않았어요. (학생수/정원 증가 후 다시 시도)")
                                 st.rerun()
@@ -10421,6 +10666,7 @@ if "💼 직업/월급" in tabs:
                             if new_assigned != assigned:
                                 ref.update({"assigned_ids": new_assigned})
                                 toast("해제 완료!", icon="✅")
+                                st.session_state["job_assign_reset_req2"] = True
                                 st.rerun()
                             else:
                                 st.info("해제할 배정이 없습니다.")
@@ -10445,6 +10691,7 @@ if "💼 직업/월급" in tabs:
                         batch.update(db.collection("job_salary").document(rid2), {"assigned_ids": empty_ids})
                     batch.commit()
                     toast("전체 직업 해제 완료!", icon="✅")
+                    st.session_state["job_assign_reset_req2"] = True
                     st.rerun()
                 except Exception as e:
                     st.error(f"전체 직업 해제 실패: {e}")
@@ -10744,6 +10991,14 @@ if "💼 직업/월급" in tabs:
         
         st.markdown("### ➕ 직업 추가 / 수정")
 
+        if st.session_state.get("job_edit_reset_req", False):
+            st.session_state["job_edit_pick"] = "(새로 추가)"
+            st.session_state["job_edit_prev_pick"] = "(새로 추가)"
+            st.session_state["job_in_job"] = ""
+            st.session_state["job_in_salary"] = 0
+            st.session_state["job_in_count"] = 1
+            st.session_state["job_edit_reset_req"] = False        
+
         pick_labels = ["(새로 추가)"] + [f"{r['order']} | {r['job']} (월급 {int(r['salary'])})" for r in rows]
         picked = st.selectbox("편집 대상", pick_labels, key="job_edit_pick")
 
@@ -10756,12 +11011,26 @@ if "💼 직업/월급" in tabs:
                     edit_row = rr
                     break
 
+        def _sync_job_edit_inputs(target_row):
+            st.session_state["job_in_job"] = target_row["job"] if target_row else ""
+            st.session_state["job_in_salary"] = int(target_row["salary"]) if target_row else 0
+            st.session_state["job_in_count"] = int(target_row["student_count"]) if target_row else 1
+
+        # selectbox 변경 시 text/number_input key 상태를 직접 동기화
+        # (Streamlit key state가 value 인자보다 우선되어 빈칸/기본값이 남는 문제 방지)
+        prev_pick = st.session_state.get("job_edit_prev_pick")
+        if prev_pick != picked:
+            _sync_job_edit_inputs(edit_row)
+            st.session_state["job_edit_prev_pick"] = picked
+        elif "job_in_job" not in st.session_state:
+            _sync_job_edit_inputs(edit_row)        
+
         # 입력폼(직업/월급)
         f1, f2, f3 = st.columns([2.2, 1.2, 1.2])
         with f1:
-            job_in = st.text_input("직업", value=(edit_row["job"] if edit_row else ""), key="job_in_job").strip()
+            job_in = st.text_input("직업", key="job_in_job").strip()
         with f2:
-            sal_in = st.number_input("월급", min_value=0, step=1, value=int(edit_row["salary"]) if edit_row else 0, key="job_in_salary")
+            sal_in = st.number_input("월급", min_value=0, step=1, key="job_in_salary")
         with f3:
             # 실수령 미리보기
             st.metric("실수령액(자동)", _calc_net(int(sal_in), cfg))
@@ -10771,7 +11040,6 @@ if "💼 직업/월급" in tabs:
             "학생 수(최소 1)",
             min_value=1,
             step=1,
-            value=int(edit_row["student_count"]) if edit_row else 1,
             key="job_in_count",
         )
         b1, b2, b3 = st.columns([1, 1, 1])
@@ -10801,6 +11069,7 @@ if "💼 직업/월급" in tabs:
                         }
                     )
                     toast("수정 완료!", icon="✅")
+                    st.session_state["job_edit_reset_req"] = True                    
                     st.rerun()
                 else:
                     # 신규 추가(order는 입력 순서대로 마지막+1)
@@ -10817,6 +11086,7 @@ if "💼 직업/월급" in tabs:
                         }
                     )
                     toast("추가 완료!", icon="✅")
+                    st.session_state["job_edit_reset_req"] = True                    
                     st.rerun()
 
         # ✅ 입력 초기화 버튼 삭제 (자리만 빈 칸으로 유지)
@@ -11052,6 +11322,7 @@ if "🏛️ 국세청(국고)" in tabs:
                     )
                     if res.get("ok"):
                         toast("국고 저장 완료!", icon="✅")
+                        st.session_state["treasury_trade_reset_request"] = True
                         st.rerun()
                     else:
                         st.error(res.get("error", "국고 저장 실패"))
@@ -11065,15 +11336,35 @@ if "🏛️ 국세청(국고)" in tabs:
 
         tpls = api_list_treasury_templates_cached().get("templates", [])
         pick_labels = ["(새로 추가)"] + [f"{t.get('order', 999999)} | {treasury_template_display(t)}" for t in tpls]
+        tpl_by_pick = {f"{t.get('order', 999999)} | {treasury_template_display(t)}": t for t in tpls}
+
+        if st.session_state.get("tre_tpl_reset_req", False):
+            st.session_state["tre_tpl_pick"] = "(새로 추가)"
+            st.session_state["tre_tpl_pick_prev"] = "(새로 추가)"
+            st.session_state["tre_tpl_label"] = ""
+            st.session_state["tre_tpl_kind_kr"] = "세입"
+            st.session_state["tre_tpl_amount"] = 0
+            st.session_state["tre_tpl_order"] = 1
+            st.session_state["tre_tpl_reset_req"] = False
+        
         picked = st.selectbox("편집 대상", pick_labels, key="tre_tpl_pick")
 
-        edit_tpl = None
-        if picked != "(새로 추가)":
-            for t in tpls:
-                lab = f"{t.get('order', 999999)} | {treasury_template_display(t)}"
-                if lab == picked:
-                    edit_tpl = t
-                    break
+        edit_tpl = tpl_by_pick.get(picked) if picked != "(새로 추가)" else None
+
+        # ✅ 편집 대상이 바뀌면 입력칸(라벨/종류/금액/순서)도 즉시 동기화
+        prev_pick_key = "tre_tpl_pick_prev"
+        if st.session_state.get(prev_pick_key) != picked:
+            if edit_tpl:
+                st.session_state["tre_tpl_label"] = str(edit_tpl.get("label", ""))
+                st.session_state["tre_tpl_kind_kr"] = ("세출" if str(edit_tpl.get("kind", "income")) == "expense" else "세입")
+                st.session_state["tre_tpl_amount"] = int(edit_tpl.get("amount", 0) or 0)
+                st.session_state["tre_tpl_order"] = int(edit_tpl.get("order", 1) or 1)
+            else:
+                st.session_state["tre_tpl_label"] = ""
+                st.session_state["tre_tpl_kind_kr"] = "세입"
+                st.session_state["tre_tpl_amount"] = 0
+                st.session_state["tre_tpl_order"] = 1
+            st.session_state[prev_pick_key] = picked
 
         f1, f2, f3, f4 = st.columns([2.2, 1.2, 1.2, 1.0])
         with f1:
@@ -11117,6 +11408,7 @@ if "🏛️ 국세청(국고)" in tabs:
                     )
                     if res.get("ok"):
                         toast("국고 템플릿 저장 완료!", icon="✅")
+                        st.session_state["tre_tpl_reset_req"] = True
                         st.rerun()
                     else:
                         st.error(res.get("error", "저장 실패"))
@@ -11124,8 +11416,10 @@ if "🏛️ 국세청(국고)" in tabs:
         with b2:
             if st.button("🧹 입력 초기화", use_container_width=True, key="tre_tpl_clear"):
                 st.session_state.pop("tre_tpl_label", None)
+                st.session_state.pop("tre_tpl_kind_kr", None)
                 st.session_state.pop("tre_tpl_amount", None)
                 st.session_state.pop("tre_tpl_order", None)
+                st.session_state.pop("tre_tpl_pick_prev", None)
                 st.session_state["tre_tpl_pick"] = "(새로 추가)"
                 st.rerun()
 
@@ -11370,9 +11664,22 @@ if "📊 통계청" in tabs:
             if st.session_state.get("stat_reset_confirm", False):
                 st.error("⚠️ 초기화하면 모든 제출물 내역(열)이 전부 삭제됩니다. 진행할까요?")
 
+                if st.session_state.pop("stat_reset_clear_pin", False):
+                    st.session_state.pop("stat_reset_admin_pin", None)                
+
+                admin_pin_for_reset = st.text_input(
+                    "관리자 비밀번호 입력",
+                    type="password",
+                    key="stat_reset_admin_pin",
+                    help="관리자 비밀번호를 정확히 입력해야 초기화가 실행됩니다.",
+                )                
+                
                 yy2, nn2 = st.columns(2)
                 with yy2:
                     if st.button("예(전체 삭제)", use_container_width=True, key="stat_reset_yes"):
+                        if str(admin_pin_for_reset or "").strip() != str(ADMIN_PIN):
+                            st.error("관리자 비밀번호가 올바르지 않습니다.")
+                            st.stop()
                         ok_cnt = 0
                         fail_msgs = []
 
@@ -11398,11 +11705,13 @@ if "📊 통계청" in tabs:
                         st.session_state["stat_delete_confirm"] = False
                         st.session_state["stat_loaded_sig"] = ""
                         st.session_state["stat_edit"] = {}
+                        st.session_state["stat_reset_clear_pin"] = True
                         st.rerun()
 
                 with nn2:
                     if st.button("아니오", use_container_width=True, key="stat_reset_no"):
                         st.session_state["stat_reset_confirm"] = False
+                        st.session_state["stat_reset_clear_pin"] = True
                         st.rerun()
 
 
