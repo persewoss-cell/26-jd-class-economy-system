@@ -11467,6 +11467,125 @@ if "🏛️ 국세청(국고)" in tabs:
                     else:
                         st.error(res.get("error", "삭제 실패"))
 
+        st.markdown("### 📥 국고 템플릿 엑셀로 일괄 추가")
+
+        import io
+
+        tre_sample_df = pd.DataFrame(
+            [
+                {"라벨(내역)": "행사 지원금", "종류": "세입", "금액": 1000, "순서": 1},
+                {"라벨(내역)": "교구 구매", "종류": "세출", "금액": 300, "순서": 2},
+                {"라벨(내역)": "분실 벌금", "종류": "세입", "금액": 50, "순서": 3},
+            ],
+            columns=["라벨(내역)", "종류", "금액", "순서"],
+        )
+
+        tre_bio = io.BytesIO()
+        with pd.ExcelWriter(tre_bio, engine="openpyxl") as writer:
+            tre_sample_df.to_excel(writer, index=False, sheet_name="treasury_templates")
+        tre_bio.seek(0)
+
+        st.download_button(
+            "📄 국고 템플릿 샘플 엑셀 다운로드",
+            data=tre_bio.getvalue(),
+            file_name="국고_템플릿_샘플.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="tre_tpl_sample_xlsx_download",
+        )
+
+        st.caption("• 샘플 형식: 라벨(내역) | 종류(세입/세출) | 금액 | 순서")
+        st.caption("• 엑셀을 올린 뒤, 아래의 **저장** 버튼을 눌러야 실제 반영됩니다.")
+
+        tre_upl = st.file_uploader(
+            "국고 템플릿 엑셀 업로드(.xlsx)",
+            type=["xlsx"],
+            key="tre_tpl_bulk_xlsx",
+            help="샘플 형식 그대로 업로드하세요. 업로드만으로는 반영되지 않고, 아래 '저장' 버튼을 눌러야 반영됩니다.",
+        )
+
+        st.session_state.setdefault("tre_tpl_bulk_df", None)
+
+        if tre_upl is not None:
+            try:
+                tre_df = pd.read_excel(tre_upl).copy()
+                tre_df.columns = [str(c).strip() for c in tre_df.columns]
+
+                tre_need_cols = ["라벨(내역)", "종류", "금액", "순서"]
+                tre_miss = [c for c in tre_need_cols if c not in tre_df.columns]
+                if tre_miss:
+                    st.error(f"필수 컬럼이 없습니다: {tre_miss}")
+                    st.session_state["tre_tpl_bulk_df"] = None
+                else:
+                    tre_df["라벨(내역)"] = tre_df["라벨(내역)"].astype(str).str.strip()
+                    tre_df["종류"] = tre_df["종류"].astype(str).str.strip()
+                    tre_df["금액"] = pd.to_numeric(tre_df["금액"], errors="coerce").fillna(0).astype(int)
+                    tre_df["순서"] = pd.to_numeric(tre_df["순서"], errors="coerce").fillna(999999).astype(int)
+
+                    bad_label = tre_df[tre_df["라벨(내역)"].str.len() == 0]
+                    bad_kind = tre_df[~tre_df["종류"].isin(["세입", "세출"])]
+                    bad_amount = tre_df[tre_df["금액"] <= 0]
+
+                    if (not bad_label.empty) or (not bad_kind.empty) or (not bad_amount.empty):
+                        if not bad_label.empty:
+                            st.error("❌ 라벨(내역)이 비어있는 행이 있습니다.")
+                        if not bad_kind.empty:
+                            st.error("❌ 종류 값이 잘못된 행이 있습니다. (세입/세출만 가능)")
+                        if not bad_amount.empty:
+                            st.error("❌ 금액은 1 이상이어야 합니다.")
+                        st.session_state["tre_tpl_bulk_df"] = None
+                    else:
+                        st.session_state["tre_tpl_bulk_df"] = tre_df
+                        st.success(f"업로드 완료! ({len(tre_df)}행) 아래 미리보기 확인 후 저장을 누르세요.")
+                        st.dataframe(tre_df, use_container_width=True, hide_index=True)
+            except Exception as e:
+                st.error(f"엑셀 읽기 실패: {e}")
+                st.session_state["tre_tpl_bulk_df"] = None
+
+        tre_overwrite = st.checkbox(
+            "저장 시 기존 국고 템플릿 리스트를 모두 삭제하고 새로 올린 엑셀로 덮어쓰기",
+            value=False,
+            key="tre_tpl_bulk_delete_old",
+        )
+
+        if st.button("✅ 국고 템플릿 엑셀 내용 저장(반영)", use_container_width=True, key="tre_tpl_bulk_save_btn", disabled=(not writable)):
+            if not writable:
+                st.error("관리자 전용입니다.")
+            else:
+                tre_df2 = st.session_state.get("tre_tpl_bulk_df", None)
+                if tre_df2 is None or tre_df2.empty:
+                    st.error("먼저 올바른 엑셀을 업로드하세요.")
+                else:
+                    try:
+                        if tre_overwrite:
+                            docs = list(db.collection("treasury_templates").stream())
+                            if docs:
+                                batch = db.batch()
+                                for d in docs:
+                                    batch.delete(d.reference)
+                                batch.commit()
+
+                        kind_map = {"세입": "income", "세출": "expense"}
+                        for _, row in tre_df2.iterrows():
+                            save_res = api_upsert_treasury_template(
+                                admin_pin=ADMIN_PIN,
+                                template_id="",
+                                label=str(row.get("라벨(내역)", "") or "").strip(),
+                                kind=kind_map.get(str(row.get("종류", "세입")).strip(), "income"),
+                                amount=int(row.get("금액", 0) or 0),
+                                order=int(row.get("순서", 999999) or 999999),
+                            )
+                            if not save_res.get("ok"):
+                                raise RuntimeError(save_res.get("error", "저장 실패"))
+
+                        api_list_treasury_templates_cached.clear()
+                        st.session_state["tre_tpl_bulk_df"] = None
+                        st.session_state["tre_tpl_reset_req"] = True
+                        toast("국고 템플릿 엑셀 저장(반영) 완료!", icon="📥")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"국고 템플릿 엑셀 저장 실패: {e}")
+
 # =========================
 # 📊 통계청(제출물) 탭  ✅(관리자용 UI 추가)
 # - 클릭은 로컬만 변경(X→O→△→X)
