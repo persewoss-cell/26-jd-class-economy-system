@@ -845,6 +845,13 @@ def _get_role_name_by_student_id(student_id: str) -> str:
         if not sid:
             return "없음"
 
+        role_names: list[str] = []
+
+        def _add_role_name(name: str):
+            nm = str(name or "").strip()
+            if nm and nm not in role_names:
+                role_names.append(nm)        
+
         # (1) students 문서에서 먼저 찾기 (job_name/job/role_id/job_role_id/job_id 등)
         snap = db.collection("students").document(sid).get()
         if snap.exists:
@@ -860,29 +867,30 @@ def _get_role_name_by_student_id(student_id: str) -> str:
             # ✅ 학생 문서에 job_name/job이 직접 들어있는 경우
             job_direct = str(sdata.get("job_name") or sdata.get("job") or "").strip()
             if job_direct:
-                return job_direct
+                # 입력값이 "은행원, 통계청" 형태일 수도 있어 구분자 분해 후 누적
+                for part in [x.strip() for x in job_direct.split(",")]:
+                    _add_role_name(part)                
 
             # ✅ role_id가 있으면 roles 컬렉션에서 이름 조회
             if rid:
                 role_by_id, _ = _get_role_lookup_cached()
                 nm = str(role_by_id.get(rid, rid)).strip()
                 if nm:
-                    return nm
-
-                # roles 문서가 없으면 role_id 자체를 직업명으로 보여주기
-                return rid
+                    _add_role_name(nm)
+                else:
+                    # roles 문서가 없으면 role_id 자체를 직업명으로 보여주기
+                    _add_role_name(rid)
 
         # (2) students에 없으면 job_salary에서 assigned_ids로 찾기 (직업/월급 탭 방식)
         _, jobs_by_student = _get_role_lookup_cached()
         jobs = list(jobs_by_student.get(sid, []))
 
         if jobs:
-            # 중복 제거(순서 유지)
-            uniq = []
             for j in jobs:
-                if j not in uniq:
-                    uniq.append(j)
-            return ", ".join(uniq)
+                _add_role_name(j)
+
+        if role_names:
+            return ", ".join(role_names)
 
         return "없음"
 
@@ -5861,13 +5869,17 @@ if not st.session_state.logged_in:
         st.session_state["login_name_input"] = _saved_name
 
     with st.form("login_form", clear_on_submit=False):
-        login_c1, login_c2, login_c3 = st.columns([2, 2, 1])
+        login_c1, login_c2 = st.columns([1, 1])
         with login_c1:
             login_name = st.text_input("이름", key="login_name_input").strip()
         with login_c2:
             login_pin = st.text_input("비밀번호", type="password", key="login_pin_input").strip()
-        with login_c3:
-            login_btn = st.form_submit_button("로그인", use_container_width=True)
+
+        # NOTE:
+        # 일부 Streamlit 버전에서 form_submit_button이 컬럼 내부에만 있을 때
+        # "Missing Submit Button" 경고가 순간적으로 표시되는 사례가 있어,
+        # submit 버튼은 form 루트에 직접 배치한다.
+        login_btn = st.form_submit_button("로그인", use_container_width=True)
 
     if login_btn:
         if not login_name:
