@@ -8906,6 +8906,19 @@ def _render_invest_admin_like(*, inv_admin_ok_flag: bool, force_is_admin: bool, 
     view_rows = []
     for x in ledger_rows:
         redeemed = bool(x.get("redeemed", False))
+
+        # 과거/현재 필드명 혼재 대응:
+        # 지급 처리 시 저장되는 키가 버전에 따라 다를 수 있어 장부 표시에서 모두 흡수한다.
+        sell_date_label = str(
+            x.get("sell_date_label", x.get("redeemed_label", "")) or ""
+        )
+        sell_price = _as_price1(x.get("sell_price", x.get("redeemed_price", 0.0)))
+        diff_val = _as_price1(x.get("diff", 0.0))
+        profit_val = float(x.get("profit", x.get("redeemed_profit", 0.0)) or 0.0)
+        redeem_amount_val = int(
+            x.get("redeem_amount", x.get("redeemed_amount", 0)) or 0
+        )
+        
         view_rows.append(
             {
                 "번호": int(x.get("no", 0) or 0),
@@ -8915,11 +8928,11 @@ def _render_invest_admin_like(*, inv_admin_ok_flag: bool, force_is_admin: bool, 
                 "매입 주가": f"{_as_price1(x.get('buy_price', 0.0)):.1f}",
                 "투자 금액": int(x.get("invest_amount", 0) or 0),
                 "지급완료": "✅" if redeemed else "",
-                "매수일자": str(x.get("sell_date_label", "") or ""),
-                "매수 주가": f"{_as_price1(x.get('sell_price', 0.0)):.1f}" if redeemed else "",
-                "주가차이": f"{_as_price1(x.get('diff', 0.0)):.1f}" if redeemed else "",
-                "수익/손실금": int(round(float(x.get("profit", 0.0) or 0.0))) if redeemed else "",
-                "찾을 금액": int(x.get("redeem_amount", 0) or 0) if redeemed else "",
+                "매수일자": sell_date_label,
+                "매수 주가": f"{sell_price:.1f}" if redeemed else "",
+                "주가차이": f"{diff_val:.1f}" if redeemed else "",
+                "수익/손실금": int(round(profit_val)) if redeemed else "",
+                "찾을 금액": redeem_amount_val if redeemed else "",
                 "_doc_id": x.get("_doc_id"),
                 "_student_id": x.get("student_id"),
                 "_product_id": x.get("product_id"),
@@ -9040,6 +9053,13 @@ def _render_invest_admin_like(*, inv_admin_ok_flag: bool, force_is_admin: bool, 
                                         {
                                             "redeemed": True,
                                             "redeemed_at": firestore.SERVER_TIMESTAMP,
+                                            "sell_date_label": sell_label,
+                                            "sell_price": _as_price1(cur_price),
+                                            "diff": _as_price1(diff),
+                                            "profit": float(profit),
+                                            "redeem_amount": int(redeem_amt),
+
+                                            # 구버전 키와도 함께 저장(하위 호환)                                            
                                             "redeemed_label": sell_label,
                                             "redeemed_amount": int(redeem_amt),
                                         }
