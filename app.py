@@ -5813,6 +5813,33 @@ def _sync_login_persistence_cookies(name: str, pin: str, remember_name: bool, re
     )
 
 
+def _persist_login_inputs(name: str, pin: str):
+    """로그인 성공 시 remember 옵션에 맞춰 입력값을 저장/삭제한다."""
+    try:
+        if bool(st.session_state.get("remember_name_check", False)):
+            st.query_params["saved_name"] = str(name or "")
+            st.query_params["remember"] = "1"
+        else:
+            st.query_params.pop("saved_name", None)
+            st.query_params.pop("remember", None)
+
+        if bool(st.session_state.get("remember_pin_check", False)):
+            st.query_params["saved_pin"] = str(pin or "")
+            st.query_params["remember_pin"] = "1"
+        else:
+            st.query_params.pop("saved_pin", None)
+            st.query_params.pop("remember_pin", None)
+    except Exception:
+        pass
+
+    _sync_login_persistence_cookies(
+        name,
+        pin,
+        bool(st.session_state.get("remember_name_check", False)),
+        bool(st.session_state.get("remember_pin_check", False)),
+    )
+
+
 def _restore_login_from_query_params_if_possible():
     """세션이 초기화된 경우(URL에 저장된 인증값으로) 로그인 복원."""
     if bool(st.session_state.get("logged_in", False)):
@@ -6096,29 +6123,7 @@ if not st.session_state.logged_in:
             st.session_state.login_pin = ADMIN_PIN
             st.session_state["login_student_ctx"] = {}
             _set_auth_query_params(ADMIN_NAME, ADMIN_PIN, is_admin_user=True)
-            # ✅ 이름 저장 처리
-            try:
-                if bool(st.session_state.get("remember_name_check", False)):
-                    st.query_params["saved_name"] = login_name
-                    st.query_params["remember"] = "1"
-                else:
-                    st.query_params.pop("saved_name", None)
-                    st.query_params.pop("remember", None)
-
-                if bool(st.session_state.get("remember_pin_check", False)):
-                    st.query_params["saved_pin"] = login_pin
-                    st.query_params["remember_pin"] = "1"
-                else:
-                    st.query_params.pop("saved_pin", None)
-                    st.query_params.pop("remember_pin", None)            
-            except Exception:
-                pass
-            _sync_login_persistence_cookies(
-                login_name,
-                login_pin,
-                bool(st.session_state.get("remember_name_check", False)),
-                bool(st.session_state.get("remember_pin_check", False)),
-            )                
+            _persist_login_inputs(login_name, login_pin)
             toast("관리자 모드 ON", icon="🔓")
             st.rerun()
         elif not pin_ok(login_pin):
@@ -6134,31 +6139,9 @@ if not st.session_state.logged_in:
                 st.session_state.login_pin = login_pin
                 _set_login_student_context_from_doc(doc)
                 _set_auth_query_params(login_name, login_pin, is_admin_user=False)
-            # ✅ 이름 저장 처리
-            try:
-                if bool(st.session_state.get("remember_name_check", False)):
-                    st.query_params["saved_name"] = login_name
-                    st.query_params["remember"] = "1"
-                else:
-                    st.query_params.pop("saved_name", None)
-                    st.query_params.pop("remember", None)
-
-                if bool(st.session_state.get("remember_pin_check", False)):
-                    st.query_params["saved_pin"] = login_pin
-                    st.query_params["remember_pin"] = "1"
-                else:
-                    st.query_params.pop("saved_pin", None)
-                    st.query_params.pop("remember_pin", None)            
-            except Exception:
-                pass
-            _sync_login_persistence_cookies(
-                login_name,
-                login_pin,
-                bool(st.session_state.get("remember_name_check", False)),
-                bool(st.session_state.get("remember_pin_check", False)),
-            )                
-            toast("로그인 완료!", icon="✅")
-            st.rerun()
+                _persist_login_inputs(login_name, login_pin)
+                toast("로그인 완료!", icon="✅")
+                st.rerun()
 
 else:
     # ✅ 로그인 직후 rerun 이후에도 쿠키가 확실히 저장되도록 1회 더 동기화
