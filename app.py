@@ -6019,9 +6019,9 @@ if not st.session_state.logged_in:
 
         remember_c1, remember_c2 = st.columns([1, 1])
         with remember_c1:
-            st.checkbox("☑️ 아이디 저장", key="remember_name_check")
+            st.checkbox("아이디 기억하기", key="remember_name_check")
         with remember_c2:
-            st.checkbox("☑️ 비밀번호 기억하기", key="remember_pin_check")
+            st.checkbox("비밀번호 기억하기", key="remember_pin_check")
         
         # NOTE:
         # 일부 Streamlit 버전에서 form_submit_button이 컬럼 내부에만 있을 때
