@@ -5656,6 +5656,62 @@ for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+
+def _set_auth_query_params(name: str, pin: str, is_admin_user: bool):
+    """브라우저 새로고침(F5) 시 로그인 상태를 복원하기 위한 URL 파라미터 저장."""
+    try:
+        st.query_params["auth_name"] = str(name or "")
+        st.query_params["auth_pin"] = str(pin or "")
+        st.query_params["auth_role"] = "admin" if bool(is_admin_user) else "student"
+    except Exception:
+        pass
+
+
+def _clear_auth_query_params():
+    try:
+        st.query_params.pop("auth_name", None)
+        st.query_params.pop("auth_pin", None)
+        st.query_params.pop("auth_role", None)
+    except Exception:
+        pass
+
+
+def _restore_login_from_query_params_if_possible():
+    """세션이 초기화된 경우(URL에 저장된 인증값으로) 로그인 복원."""
+    if bool(st.session_state.get("logged_in", False)):
+        return
+
+    try:
+        auth_name = str(st.query_params.get("auth_name", "") or "").strip()
+        auth_pin = str(st.query_params.get("auth_pin", "") or "").strip()
+        auth_role = str(st.query_params.get("auth_role", "") or "").strip().lower()
+    except Exception:
+        return
+
+    if not auth_name or not auth_pin:
+        return
+
+    if auth_role == "admin":
+        if is_admin_login(auth_name, auth_pin):
+            st.session_state.admin_ok = True
+            st.session_state.logged_in = True
+            st.session_state.login_name = ADMIN_NAME
+            st.session_state.login_pin = ADMIN_PIN
+            st.session_state["login_student_ctx"] = {}
+        return
+
+    if auth_role == "student" and pin_ok(auth_pin):
+        doc = fs_auth_student(auth_name, auth_pin)
+        if doc:
+            st.session_state.admin_ok = False
+            st.session_state.logged_in = True
+            st.session_state.login_name = auth_name
+            st.session_state.login_pin = auth_pin
+            _set_login_student_context_from_doc(doc)
+
+
+_restore_login_from_query_params_if_possible()
+
 # =========================
 # Sidebar: 계정 만들기/삭제 + (관리자) 학생 엑셀 샘플 다운로드/일괄 업로드 + PIN 변경
 # =========================
@@ -5890,6 +5946,7 @@ if not st.session_state.logged_in:
             st.session_state.login_name = ADMIN_NAME
             st.session_state.login_pin = ADMIN_PIN
             st.session_state["login_student_ctx"] = {}
+            _set_auth_query_params(ADMIN_NAME, ADMIN_PIN, is_admin_user=True)
             # ✅ 이름 저장 처리
             try:
                 if bool(st.session_state.get("remember_name_check", False)):
@@ -5914,6 +5971,7 @@ if not st.session_state.logged_in:
                 st.session_state.login_name = login_name
                 st.session_state.login_pin = login_pin
                 _set_login_student_context_from_doc(doc)
+                _set_auth_query_params(login_name, login_pin, is_admin_user=False)
             # ✅ 이름 저장 처리
             try:
                 if bool(st.session_state.get("remember_name_check", False)):
@@ -5935,6 +5993,7 @@ else:
         st.session_state.login_pin = ""
         st.session_state.undo_mode = False
         st.session_state["login_student_ctx"] = {}
+        _clear_auth_query_params()
 
         # ✅ (PATCH) 개별조회 지연로딩 상태 완전 초기화 (로그아웃 후 재로그인 시 자동 로드 방지)
         st.session_state.pop("admin_ind_view_loaded", None)
