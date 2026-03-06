@@ -5706,11 +5706,17 @@ def _sync_login_persistence_cookies(name: str, pin: str, remember_name: bool, re
         <script>
         const p = {payload_js};
         const maxAge = 60 * 60 * 24 * 365;
+        const cookieDoc = (() => {{
+            try {{
+                if (window.parent && window.parent.document) return window.parent.document;
+            }} catch (e) {{}}
+            return document;
+        }})();        
         const remove = (key) => {{
             document.cookie = `${{key}}=; Max-Age=0; Path=/; SameSite=Lax`;
         }};
         const write = (key, value) => {{
-            document.cookie = `${{key}}=${{encodeURIComponent(value)}}; Max-Age=${{maxAge}}; Path=/; SameSite=Lax`;
+            cookieDoc.cookie = `${{key}}=${{encodeURIComponent(value)}}; Max-Age=${{maxAge}}; Path=/; SameSite=Lax`;
         }};
 
         if (p.remember_name && p.name) {{
