@@ -5813,6 +5813,64 @@ def _sync_login_persistence_cookies(name: str, pin: str, remember_name: bool, re
     )
 
 
+def _inject_login_prefill_from_local_storage():
+    """브라우저 localStorage 값을 로그인 입력칸에 자동 주입한다."""
+    components.html(
+        """
+        <script>
+        const read = (key) => {
+            try { return String(localStorage.getItem(key) || "").trim(); } catch (e) { return ""; }
+        };
+
+        const savedName = read("ce_saved_name");
+        const savedPin = read("ce_saved_pin");
+        const rememberName = read("ce_remember_name") === "1";
+        const rememberPin = read("ce_remember_pin") === "1";
+
+        const setNativeValue = (el, value) => {
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            if (!setter || !el) return;
+            setter.call(el, value);
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+
+        const clickCheckboxIfNeeded = (el, shouldBeChecked) => {
+            if (!el) return;
+            if (Boolean(el.checked) !== Boolean(shouldBeChecked)) {
+                el.click();
+            }
+        };
+
+        const tryFill = () => {
+            const root = window.parent?.document || document;
+            const textInputs = Array.from(root.querySelectorAll('input[type="text"]'));
+            const pwdInputs = Array.from(root.querySelectorAll('input[type="password"]'));
+            const nameInput = textInputs.find((el) => String(el.value || "").trim() === "") || textInputs[0];
+            const pinInput = pwdInputs.find((el) => String(el.value || "").trim() === "") || pwdInputs[0];
+            if (savedName && nameInput && !String(nameInput.value || "").trim()) {
+                setNativeValue(nameInput, savedName);
+            }
+            if (savedPin && pinInput && !String(pinInput.value || "").trim()) {
+                setNativeValue(pinInput, savedPin);
+            }
+
+            const checkboxes = Array.from(root.querySelectorAll('input[type="checkbox"]'));
+            if (checkboxes.length >= 2) {
+                clickCheckboxIfNeeded(checkboxes[0], rememberName);
+                clickCheckboxIfNeeded(checkboxes[1], rememberPin);
+            }
+        };
+
+        tryFill();
+        setTimeout(tryFill, 120);
+        setTimeout(tryFill, 420);
+        </script>
+        """,
+        height=0,
+    )
+
+
 def _persist_login_inputs(name: str, pin: str):
     """로그인 성공 시 remember 옵션에 맞춰 입력값을 저장/삭제한다."""
     try:
@@ -6107,6 +6165,9 @@ if not st.session_state.logged_in:
         # submit 버튼은 form 루트에 직접 배치한다.
         login_btn = st.form_submit_button("로그인", use_container_width=True)
 
+    # ✅ 브라우저 재시작 후에도 localStorage 저장값을 로그인 입력칸에 자동 주입
+    _inject_login_prefill_from_local_storage()
+    
     # ⚠️ 주의: 로그인 화면 "첫 렌더"에 쿠키/스토리지를 강제 동기화하면
     # 브라우저가 저장값을 아직 노출하지 못한 순간(특히 재시작 직후)에
     # remember 체크가 False로 평가되어 기존 저장값을 지워버릴 수 있다.
