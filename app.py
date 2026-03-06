@@ -5706,33 +5706,74 @@ def _sync_login_persistence_cookies(name: str, pin: str, remember_name: bool, re
         <script>
         const p = {payload_js};
         const maxAge = 60 * 60 * 24 * 365;
-        const cookieDoc = (() => {{
+        const docs = (() => {{
+            const out = [document];
             try {{
-                if (window.parent && window.parent.document) return window.parent.document;
+                if (window.parent && window.parent.document && window.parent.document !== document) {{
+                    out.push(window.parent.document);
+                }}
             }} catch (e) {{}}
-            return document;
-        }})();        
+            return out;
+        }})();
+        const localRead = (key) => {{
+            try {{ return localStorage.getItem(key) || ""; }} catch (e) {{ return ""; }}
+        }};
+        const localWrite = (key, value) => {{
+            try {{ localStorage.setItem(key, String(value)); }} catch (e) {{}}
+        }};
+        const localRemove = (key) => {{
+            try {{ localStorage.removeItem(key); }} catch (e) {{}}
+        }};
         const remove = (key) => {{
-            document.cookie = `${{key}}=; Max-Age=0; Path=/; SameSite=Lax`;
+            docs.forEach((d) => {{
+                d.cookie = `${{key}}=; Max-Age=0; Path=/; SameSite=Lax`;
+            }});
         }};
         const write = (key, value) => {{
-            cookieDoc.cookie = `${{key}}=${{encodeURIComponent(value)}}; Max-Age=${{maxAge}}; Path=/; SameSite=Lax`;
+            docs.forEach((d) => {{
+                d.cookie = `${{key}}=${{encodeURIComponent(value)}}; Max-Age=${{maxAge}}; Path=/; SameSite=Lax`;
+            }});
         }};
 
-        if (p.remember_name && p.name) {{
-            write("ce_saved_name", p.name);
+        const resolveValue = (rawValue, cookieKey, localKey) => {{
+            const v = String(rawValue || "").trim();
+            if (v) return v;
+            const localValue = localRead(localKey).trim();
+            if (localValue) return localValue;
+            const cookieHit = docs
+                .map((d) => String(d.cookie || ""))
+                .find((c) => c.includes(`${{cookieKey}}=`));
+            if (!cookieHit) return "";
+            const match = cookieHit.match(new RegExp(`${{cookieKey}}=([^;]+)`));
+            if (!match || !match[1]) return "";
+            try {{ return decodeURIComponent(match[1]); }} catch (e) {{ return match[1]; }}
+        }};
+
+        const nameValue = resolveValue(p.name, "ce_saved_name", "ce_saved_name");
+        const pinValue = resolveValue(p.pin, "ce_saved_pin", "ce_saved_pin");
+
+        if (p.remember_name && nameValue) {{
+            write("ce_saved_name", nameValue);
             write("ce_remember_name", "1");
+            localWrite("ce_saved_name", nameValue);
+            localWrite("ce_remember_name", "1");
         }} else {{
             remove("ce_saved_name");
             remove("ce_remember_name");
+            localRemove("ce_saved_name");
+            localRemove("ce_remember_name");
         }}
 
-        if (p.remember_pin && p.pin) {{
-            write("ce_saved_pin", p.pin);
+        if (p.remember_pin && pinValue) {{
+            write("ce_saved_pin", pinValue);
             write("ce_remember_pin", "1");
+            localWrite("ce_saved_pin", pinValue);
+            localWrite("ce_remember_pin", "1");
         }} else {{
             remove("ce_saved_pin");
             remove("ce_remember_pin");
+            localRemove("ce_saved_pin");
+            localRemove("ce_remember_pin");
         }}
         </script>
         """,
