@@ -6029,6 +6029,15 @@ if not st.session_state.logged_in:
         # submit 버튼은 form 루트에 직접 배치한다.
         login_btn = st.form_submit_button("로그인", use_container_width=True)
 
+        # ✅ 폼 렌더링 시점에도 브라우저 쿠키를 동기화해서,
+    # 브라우저를 껐다 켜도 체크한 아이디/비밀번호가 유지되도록 보강
+    _sync_login_persistence_cookies(
+        str(st.session_state.get("login_name_input", "") or ""),
+        str(st.session_state.get("login_pin_input", "") or ""),
+        bool(st.session_state.get("remember_name_check", False)),
+        bool(st.session_state.get("remember_pin_check", False)),
+    )
+
     if login_btn:
         if not login_name:
             st.error("이름을 입력해 주세요.")
@@ -6104,6 +6113,14 @@ if not st.session_state.logged_in:
             st.rerun()
 
 else:
+    # ✅ 로그인 직후 rerun 이후에도 쿠키가 확실히 저장되도록 1회 더 동기화
+    _sync_login_persistence_cookies(
+        str(st.session_state.get("login_name", "") or ""),
+        str(st.session_state.get("login_pin", "") or ""),
+        bool(st.session_state.get("remember_name_check", False)),
+        bool(st.session_state.get("remember_pin_check", False)),
+    )
+    
     if st.button("로그아웃", key="logout_btn", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.admin_ok = False
