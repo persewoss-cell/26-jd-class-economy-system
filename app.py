@@ -5678,6 +5678,38 @@ def _clear_auth_query_params():
         pass
 
 
+def _read_login_persistence_defaults():
+    """쿠키/URL 파라미터 기준으로 remember 기본값을 계산한다."""
+    saved_name = ""
+    saved_pin = ""
+    remember_name = False
+    remember_pin = False
+
+    c_saved_name, c_saved_pin, c_remember_name, c_remember_pin = _read_persisted_login_from_cookies()
+    if c_saved_name:
+        saved_name = c_saved_name
+    if c_saved_pin:
+        saved_pin = c_saved_pin
+    if c_remember_name:
+        remember_name = True
+    if c_remember_pin:
+        remember_pin = True
+
+    try:
+        qp_saved_name = str(st.query_params.get("saved_name", "") or "")
+        qp_saved_pin = str(st.query_params.get("saved_pin", "") or "")
+        if qp_saved_name:
+            saved_name = qp_saved_name
+            remember_name = bool(str(st.query_params.get("remember", "") or "") == "1")
+        if qp_saved_pin:
+            saved_pin = qp_saved_pin
+            remember_pin = bool(str(st.query_params.get("remember_pin", "") or "") == "1")
+    except Exception:
+        pass
+
+    return saved_name, saved_pin, remember_name, remember_pin
+
+
 def _read_persisted_login_from_cookies():
     """브라우저 쿠키에 저장된 로그인 입력값을 읽어온다."""
     try:
@@ -6017,35 +6049,7 @@ else:
 
 if not st.session_state.logged_in:
     # ✅ 아이디/비밀번호 기억하기(쿠키+URL에 저장되어 브라우저 재시작 후에도 자동 입력)
-    _saved_name = ""
-    _saved_pin = ""
-    _remember_default = False
-    _remember_pin_default = False
-
-    _cookie_saved_name, _cookie_saved_pin, _cookie_remember_name, _cookie_remember_pin = _read_persisted_login_from_cookies()
-    if _cookie_saved_name:
-        _saved_name = _cookie_saved_name
-    if _cookie_saved_pin:
-        _saved_pin = _cookie_saved_pin
-    if _cookie_remember_name:
-        _remember_default = True
-    if _cookie_remember_pin:
-        _remember_pin_default = True
-        
-    try:
-        _qp_saved_name = str(st.query_params.get("saved_name", "") or "")
-        _qp_saved_pin = str(st.query_params.get("saved_pin", "") or "")
-        if _qp_saved_name:
-            _saved_name = _qp_saved_name
-            _remember_default = bool(str(st.query_params.get("remember", "") or "") == "1")
-        if _qp_saved_pin:
-            _saved_pin = _qp_saved_pin
-            _remember_pin_default = bool(str(st.query_params.get("remember_pin", "") or "") == "1")
-    except Exception:
-        _saved_name = ""
-        _saved_pin = ""
-        _remember_default = False
-        _remember_pin_default = False
+    _saved_name, _saved_pin, _remember_default, _remember_pin_default = _read_login_persistence_defaults()
 
     if _saved_name and not str(st.session_state.get("login_name_input", "") or "").strip():
         st.session_state["login_name_input"] = _saved_name
@@ -6158,11 +6162,12 @@ if not st.session_state.logged_in:
 
 else:
     # ✅ 로그인 직후 rerun 이후에도 쿠키가 확실히 저장되도록 1회 더 동기화
+    _, _, _remember_default_logged_in, _remember_pin_default_logged_in = _read_login_persistence_defaults()
     _sync_login_persistence_cookies(
         str(st.session_state.get("login_name", "") or ""),
         str(st.session_state.get("login_pin", "") or ""),
-        bool(st.session_state.get("remember_name_check", False)),
-        bool(st.session_state.get("remember_pin_check", False)),
+        bool(st.session_state.get("remember_name_check", _remember_default_logged_in)),
+        bool(st.session_state.get("remember_pin_check", _remember_pin_default_logged_in)),
     )
     
     if st.button("로그아웃", key="logout_btn", use_container_width=True):
