@@ -11633,14 +11633,14 @@ if "💼 직업/월급" in tabs:
                         df["배정 수"] = pd.to_numeric(df["배정 수"], errors="coerce").fillna(0).astype(int)
                         
                         bad_job = df[df["직업"].str.len() == 0]
-                        bad_sal = df[df["월급"] <= 0]
+                        bad_sal = df[df["월급"] < 0]
                         bad_cnt = df[df["배정 수"] <= 0]
                         
                         if (not bad_job.empty) or (not bad_sal.empty) or (not bad_cnt.empty):
                             if not bad_job.empty:
                                 st.error("❌ 직업명이 비어있는 행이 있습니다.")
                             if not bad_sal.empty:
-                                st.error("❌ 월급은 1 이상이어야 합니다.")
+                                st.error("❌ 월급은 0 이상이어야 합니다.")
                             if not bad_cnt.empty:
                                 st.error("❌ 배정 수는 1 이상이어야 합니다.")
                             st.session_state["job_bulk_df"] = None
