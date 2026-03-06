@@ -5911,18 +5911,31 @@ else:
     st.subheader("🔐 로그인")
 
 if not st.session_state.logged_in:
-    # ✅ 이름 저장(체크 시 URL에 저장되어 다음에도 자동 입력)
+    # ✅ 아이디/비밀번호 기억하기(체크 시 URL에 저장되어 다음에도 자동 입력)
     _saved_name = ""
+    _saved_pin = ""
     _remember_default = False
+    _remember_pin_default = False
     try:
         _saved_name = str(st.query_params.get("saved_name", "") or "")
         _remember_default = bool(str(st.query_params.get("remember", "") or "") == "1" and _saved_name)
+        _saved_pin = str(st.query_params.get("saved_pin", "") or "")
+        _remember_pin_default = bool(str(st.query_params.get("remember_pin", "") or "") == "1" and _saved_pin)
     except Exception:
         _saved_name = ""
+        _saved_pin = ""
         _remember_default = False
+        _remember_pin_default = False
 
     if _saved_name and not str(st.session_state.get("login_name_input", "") or "").strip():
         st.session_state["login_name_input"] = _saved_name
+    if _saved_pin and not str(st.session_state.get("login_pin_input", "") or "").strip():
+        st.session_state["login_pin_input"] = _saved_pin
+
+    if "remember_name_check" not in st.session_state:
+        st.session_state["remember_name_check"] = _remember_default
+    if "remember_pin_check" not in st.session_state:
+        st.session_state["remember_pin_check"] = _remember_pin_default
 
     with st.form("login_form", clear_on_submit=False):
         login_c1, login_c2 = st.columns([1, 1])
@@ -5931,6 +5944,12 @@ if not st.session_state.logged_in:
         with login_c2:
             login_pin = st.text_input("비밀번호", type="password", key="login_pin_input").strip()
 
+        remember_c1, remember_c2 = st.columns([1, 1])
+        with remember_c1:
+            st.checkbox("☑️ 아이디 저장", key="remember_name_check")
+        with remember_c2:
+            st.checkbox("☑️ 비밀번호 기억하기", key="remember_pin_check")
+        
         # NOTE:
         # 일부 Streamlit 버전에서 form_submit_button이 컬럼 내부에만 있을 때
         # "Missing Submit Button" 경고가 순간적으로 표시되는 사례가 있어,
@@ -5955,6 +5974,13 @@ if not st.session_state.logged_in:
                 else:
                     st.query_params.pop("saved_name", None)
                     st.query_params.pop("remember", None)
+
+                if bool(st.session_state.get("remember_pin_check", False)):
+                    st.query_params["saved_pin"] = login_pin
+                    st.query_params["remember_pin"] = "1"
+                else:
+                    st.query_params.pop("saved_pin", None)
+                    st.query_params.pop("remember_pin", None)            
             except Exception:
                 pass
             toast("관리자 모드 ON", icon="🔓")
@@ -5980,6 +6006,13 @@ if not st.session_state.logged_in:
                 else:
                     st.query_params.pop("saved_name", None)
                     st.query_params.pop("remember", None)
+
+                if bool(st.session_state.get("remember_pin_check", False)):
+                    st.query_params["saved_pin"] = login_pin
+                    st.query_params["remember_pin"] = "1"
+                else:
+                    st.query_params.pop("saved_pin", None)
+                    st.query_params.pop("remember_pin", None)            
             except Exception:
                 pass
             toast("로그인 완료!", icon="✅")
