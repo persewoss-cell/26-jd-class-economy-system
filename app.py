@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from streamlit.errors import StreamlitSecretNotFoundError
 import pandas as pd
 import altair as alt
@@ -14,6 +15,7 @@ from google.api_core.exceptions import FailedPrecondition
 
 # (학급 확장용) PDF 텍스트 파싱(간단)
 import re
+import json
 
 # =========================
 # 설정
@@ -5676,6 +5678,62 @@ def _clear_auth_query_params():
         pass
 
 
+def _read_persisted_login_from_cookies():
+    """브라우저 쿠키에 저장된 로그인 입력값을 읽어온다."""
+    try:
+        cookies = dict(getattr(st.context, "cookies", {}) or {})
+    except Exception:
+        cookies = {}
+
+    saved_name = str(cookies.get("ce_saved_name", "") or "")
+    saved_pin = str(cookies.get("ce_saved_pin", "") or "")
+    remember_name = str(cookies.get("ce_remember_name", "0") or "0") == "1"
+    remember_pin = str(cookies.get("ce_remember_pin", "0") or "0") == "1"
+    return saved_name, saved_pin, remember_name, remember_pin
+
+
+def _sync_login_persistence_cookies(name: str, pin: str, remember_name: bool, remember_pin: bool):
+    """아이디/비밀번호 기억하기 값을 쿠키에 동기화한다."""
+    payload = {
+        "name": str(name or ""),
+        "pin": str(pin or ""),
+        "remember_name": bool(remember_name),
+        "remember_pin": bool(remember_pin),
+    }
+    payload_js = json.dumps(payload, ensure_ascii=False)
+    components.html(
+        f"""
+        <script>
+        const p = {payload_js};
+        const maxAge = 60 * 60 * 24 * 365;
+        const remove = (key) => {{
+            document.cookie = `${{key}}=; Max-Age=0; Path=/; SameSite=Lax`;
+        }};
+        const write = (key, value) => {{
+            document.cookie = `${{key}}=${{encodeURIComponent(value)}}; Max-Age=${{maxAge}}; Path=/; SameSite=Lax`;
+        }};
+
+        if (p.remember_name && p.name) {{
+            write("ce_saved_name", p.name);
+            write("ce_remember_name", "1");
+        }} else {{
+            remove("ce_saved_name");
+            remove("ce_remember_name");
+        }}
+
+        if (p.remember_pin && p.pin) {{
+            write("ce_saved_pin", p.pin);
+            write("ce_remember_pin", "1");
+        }} else {{
+            remove("ce_saved_pin");
+            remove("ce_remember_pin");
+        }}
+        </script>
+        """,
+        height=0,
+    )
+
+
 def _restore_login_from_query_params_if_possible():
     """세션이 초기화된 경우(URL에 저장된 인증값으로) 로그인 복원."""
     if bool(st.session_state.get("logged_in", False)):
@@ -5911,16 +5969,31 @@ else:
     st.subheader("🔐 로그인")
 
 if not st.session_state.logged_in:
-    # ✅ 아이디/비밀번호 기억하기(체크 시 URL에 저장되어 다음에도 자동 입력)
+    # ✅ 아이디/비밀번호 기억하기(쿠키+URL에 저장되어 브라우저 재시작 후에도 자동 입력)
     _saved_name = ""
     _saved_pin = ""
     _remember_default = False
     _remember_pin_default = False
+
+    _cookie_saved_name, _cookie_saved_pin, _cookie_remember_name, _cookie_remember_pin = _read_persisted_login_from_cookies()
+    if _cookie_saved_name:
+        _saved_name = _cookie_saved_name
+    if _cookie_saved_pin:
+        _saved_pin = _cookie_saved_pin
+    if _cookie_remember_name:
+        _remember_default = True
+    if _cookie_remember_pin:
+        _remember_pin_default = True
+        
     try:
-        _saved_name = str(st.query_params.get("saved_name", "") or "")
-        _remember_default = bool(str(st.query_params.get("remember", "") or "") == "1" and _saved_name)
-        _saved_pin = str(st.query_params.get("saved_pin", "") or "")
-        _remember_pin_default = bool(str(st.query_params.get("remember_pin", "") or "") == "1" and _saved_pin)
+        _qp_saved_name = str(st.query_params.get("saved_name", "") or "")
+        _qp_saved_pin = str(st.query_params.get("saved_pin", "") or "")
+        if _qp_saved_name:
+            _saved_name = _qp_saved_name
+            _remember_default = bool(str(st.query_params.get("remember", "") or "") == "1")
+        if _qp_saved_pin:
+            _saved_pin = _qp_saved_pin
+            _remember_pin_default = bool(str(st.query_params.get("remember_pin", "") or "") == "1")
     except Exception:
         _saved_name = ""
         _saved_pin = ""
@@ -5983,6 +6056,12 @@ if not st.session_state.logged_in:
                     st.query_params.pop("remember_pin", None)            
             except Exception:
                 pass
+            _sync_login_persistence_cookies(
+                login_name,
+                login_pin,
+                bool(st.session_state.get("remember_name_check", False)),
+                bool(st.session_state.get("remember_pin_check", False)),
+            )                
             toast("관리자 모드 ON", icon="🔓")
             st.rerun()
         elif not pin_ok(login_pin):
@@ -6015,6 +6094,12 @@ if not st.session_state.logged_in:
                     st.query_params.pop("remember_pin", None)            
             except Exception:
                 pass
+            _sync_login_persistence_cookies(
+                login_name,
+                login_pin,
+                bool(st.session_state.get("remember_name_check", False)),
+                bool(st.session_state.get("remember_pin_check", False)),
+            )                
             toast("로그인 완료!", icon="✅")
             st.rerun()
 
