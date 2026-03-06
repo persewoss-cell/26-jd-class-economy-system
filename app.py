@@ -6076,14 +6076,11 @@ if not st.session_state.logged_in:
         # submit 버튼은 form 루트에 직접 배치한다.
         login_btn = st.form_submit_button("로그인", use_container_width=True)
 
-        # ✅ 폼 렌더링 시점에도 브라우저 쿠키를 동기화해서,
-    # 브라우저를 껐다 켜도 체크한 아이디/비밀번호가 유지되도록 보강
-    _sync_login_persistence_cookies(
-        str(st.session_state.get("login_name_input", "") or ""),
-        str(st.session_state.get("login_pin_input", "") or ""),
-        bool(st.session_state.get("remember_name_check", False)),
-        bool(st.session_state.get("remember_pin_check", False)),
-    )
+    # ⚠️ 주의: 로그인 화면 "첫 렌더"에 쿠키/스토리지를 강제 동기화하면
+    # 브라우저가 저장값을 아직 노출하지 못한 순간(특히 재시작 직후)에
+    # remember 체크가 False로 평가되어 기존 저장값을 지워버릴 수 있다.
+    #
+    # 저장 동기화는 아래 로그인 성공 시점(+로그인 상태 유지 렌더)에서만 수행한다.
 
     if login_btn:
         if not login_name:
