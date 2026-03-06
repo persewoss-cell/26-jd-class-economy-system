@@ -5842,12 +5842,22 @@ def _inject_login_prefill_from_local_storage():
             }
         };
 
+        const findCheckboxByLabel = (root, labelText) => {
+            const rows = Array.from(root.querySelectorAll("div[data-testid='stCheckbox']"));
+            const hit = rows.find((row) => {
+                const label = row.querySelector("label")?.innerText || "";
+                return label.includes(labelText);
+            });
+            return hit?.querySelector("input[type='checkbox']") || null;
+        };
+
         const tryFill = () => {
             const root = window.parent?.document || document;
-            const textInputs = Array.from(root.querySelectorAll('input[type="text"]'));
-            const pwdInputs = Array.from(root.querySelectorAll('input[type="password"]'));
-            const nameInput = textInputs.find((el) => String(el.value || "").trim() === "") || textInputs[0];
-            const pinInput = pwdInputs.find((el) => String(el.value || "").trim() === "") || pwdInputs[0];
+            const nameInput = root.querySelector('input[aria-label="이름"]')
+                || root.querySelector('input[type="text"]');
+            const pinInput = root.querySelector('input[aria-label="비밀번호"]')
+                || root.querySelector('input[type="password"]');
+                
             if (savedName && nameInput && !String(nameInput.value || "").trim()) {
                 setNativeValue(nameInput, savedName);
             }
@@ -5855,11 +5865,10 @@ def _inject_login_prefill_from_local_storage():
                 setNativeValue(pinInput, savedPin);
             }
 
-            const checkboxes = Array.from(root.querySelectorAll('input[type="checkbox"]'));
-            if (checkboxes.length >= 2) {
-                clickCheckboxIfNeeded(checkboxes[0], rememberName);
-                clickCheckboxIfNeeded(checkboxes[1], rememberPin);
-            }
+            const rememberNameCheckbox = findCheckboxByLabel(root, "아이디 기억하기");
+            const rememberPinCheckbox = findCheckboxByLabel(root, "비밀번호 기억하기");
+            clickCheckboxIfNeeded(rememberNameCheckbox, rememberName);
+            clickCheckboxIfNeeded(rememberPinCheckbox, rememberPin);
         };
 
         tryFill();
